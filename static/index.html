@@ -4,61 +4,112 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>body{margin:0;font-family:sans-serif}
-#bar{height:78px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}
-#wrap{position:relative;height:calc(100vh - 78px)}#map{height:100%}
+#bar{height:84px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}
+#wrap{position:relative;height:calc(100vh - 84px)}#map{height:100%}
 #tint{position:absolute;inset:0;pointer-events:none;z-index:500;display:none}
-.lg{background:#fff;border-radius:6px;box-shadow:0 1px 4px #0006;font-size:12px;line-height:1.6;max-width:240px}
-.lh{padding:6px 10px;font-weight:bold;cursor:pointer}.lb{padding:0 10px 8px;max-height:45vh;overflow:auto}</style></head>
-<body><div id="bar">Загрузка…</div><div id="wrap"><div id="map"></div><div id="tint"></div></div>
+.lg,.tb{background:#fff;border-radius:6px;box-shadow:0 1px 4px #0006;font-size:12px;line-height:1.6}.lg{max-width:240px}
+.lh{padding:6px 10px;font-weight:bold;cursor:pointer}.lb{padding:0 10px 8px;max-height:45vh;overflow:auto}
+.tb{padding:4px;max-width:200px}.tb button{display:block;width:100%;margin:2px 0;padding:6px 8px;font-size:13px;border:1px solid #ccc;background:#f7f7f7;border-radius:4px;cursor:pointer}
+#me{padding:4px 6px;display:none}
+#panel{position:absolute;z-index:600;background:#fff;display:none;flex-direction:column;box-shadow:0 0 8px #0007;
+  left:0;right:0;bottom:0;max-height:55%}
+@media(min-width:700px){#panel{left:auto;width:380px;top:0;max-height:none}}
+#ph{padding:8px;border-bottom:1px solid #ddd;font-size:13px}#ph input[type=text]{width:100%;box-sizing:border-box;padding:6px;margin-bottom:4px}
+#list{overflow:auto;padding:4px 8px;font-size:13px}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}</style></head>
+<body><div id="bar">Загрузка…</div>
+<div id="wrap"><div id="map"></div><div id="tint"></div>
+<div id="panel"><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
+<label><input type="checkbox" id="fr"> только свежие (до 15 мин)</label>
+<a href="#" id="pc" style="float:right;text-decoration:none">✕ закрыть</a></div><div id="list"></div></div></div>
 <script>
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const norm=s=>String(s).toLowerCase().replace(/ё/g,'е');
 const map=L.map('map').setView([50.6,36.6],9);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
-const layer=L.layerGroup().addTo(map);let first=true;
+const layer=L.layerGroup().addTo(map);
+let first=true,D=null,userPos=null,userMarker=null,onlyFresh=false,query='';
+const $=id=>document.getElementById(id),panel=$('panel');
+// легенда (сворачивается)
 const lg=L.control({position:'bottomleft'});
 lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
   c.innerHTML='<div class="lh">ⓘ Обозначения</div><div class="lb">'+
-  '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br>'+
-  '<span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
-  '<span style="color:#999">◌</span> Пунктир: возможная зона риска (+1 км)<br>'+
-  '▭ Контур: село или посёлок<br>○ Круг 1,5 км: объект или улица<br>'+
-  '<span style="color:#e99">●</span> Бледная заливка: район<br>'+
-  '<b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
-  '<span style="color:#8b0000">■</span> Тёмно-красный: ракетная опасность<br>'+
-  '<span style="color:#c00">▢</span> Красная рамка вокруг карты: ракетная опасность по всей области<br>'+
-  '<span style="color:#f80">▢</span> Оранжевая рамка: тревога БПЛА по всей области</div>';
-  L.DomEvent.disableClickPropagation(c);
-  const b=c.querySelector('.lb');b.style.display=innerWidth<700?'none':'block';
-  c.querySelector('.lh').onclick=()=>{b.style.display=b.style.display==='none'?'block':'none'};
-  return c};lg.addTo(map);
+  '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br><span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
+  '<span style="color:#999">◌</span> Пунктир: возможная зона риска (+1 км)<br>▭ Контур: село или посёлок<br>○ Круг 1,5 км: объект или улица<br>'+
+  '<span style="color:#e99">●</span> Бледная заливка: район<br><b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
+  '<span style="color:#8b0000">■</span> Тёмно-красный: ракетная опасность<br><span style="color:#c00">▢</span> Красная рамка карты: ракетная опасность по всей области<br>'+
+  '<span style="color:#f80">▢</span> Оранжевая рамка: тревога БПЛА по всей области<br><span style="color:#1a73e8">●</span> Синяя точка: вы</div>';
+  L.DomEvent.disableClickPropagation(c);const b=c.querySelector('.lb');b.style.display=innerWidth<700?'none':'block';
+  c.querySelector('.lh').onclick=()=>{b.style.display=b.style.display==='none'?'block':'none'};return c};lg.addTo(map);
+// кнопки «Где я» и «Лента»
+const tb=L.control({position:'topright'});
+tb.onAdd=()=>{const c=L.DomUtil.create('div','tb');
+  c.innerHTML='<button id="bme">📍 Где я</button><button id="bfeed">☰ Лента и поиск</button><div id="me"></div>';
+  L.DomEvent.disableClickPropagation(c);return c};tb.addTo(map);
+$('bfeed').onclick=()=>{panel.style.display=panel.style.display==='flex'?'none':'flex'};
+$('pc').onclick=e=>{e.preventDefault();panel.style.display='none'};
+$('fr').onchange=e=>{onlyFresh=e.target.checked;redraw()};
+$('q').oninput=e=>{query=e.target.value;renderFeed()};
+$('q').onchange=()=>{const it=feedItems().find(f=>f.lat!=null);if(it&&query)map.flyTo([it.lat,it.lon],12)};
+// геометрия
+const hav=(a,b,c,d)=>{const r=Math.PI/180,x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
+function inRing(lon,lat,ring){let c=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const[xi,yi]=ring[i],[xj,yj]=ring[j];if((yi>lat)!=(yj>lat)&&lon<(xj-xi)*(lat-yi)/(yj-yi)+xi)c=!c}return c}
+const polys=g=>g.type==='Polygon'?[g.coordinates]:g.coordinates;
+const inPoly=(lon,lat,g)=>polys(g).some(p=>inRing(lon,lat,p[0])&&!p.slice(1).some(h=>inRing(lon,lat,h)));
+function dist(s,lat,lon){if(s.poly){if(inPoly(lon,lat,s.poly))return 0;let m=1e12;polys(s.poly).forEach(p=>p[0].forEach(([x,y])=>{m=Math.min(m,hav(lat,lon,y,x))}));return m}
+  return Math.max(0,hav(lat,lon,s.lat,s.lon)-s.r_in)}
+const km=m=>(m/1000).toFixed(1).replace('.',',');
+function renderMe(){const el=$('me');if(!userPos||!D){el.style.display='none';return}
+  const[lat,lon]=userPos,R=D.rocket,o=[];
+  if(R){let dr=1e12;if(R.city)(R.zones?R.zones.map(g=>({poly:g})):[{lat:50.5997,lon:36.5983,r_in:25000}]).forEach(s=>dr=Math.min(dr,dist(s,lat,lon)));
+    R.places.forEach(s=>dr=Math.min(dr,dist(s,lat,lon)));
+    if(dr===0)o.push('<b style="color:#b00000">⚠ Вы в зоне ракетной опасности</b>');
+    else if(R.oblast)o.push('Ракетная опасность объявлена по всей области');
+    else if(dr<1e12)o.push(`Ракетная опасность: до зоны ~${km(dr)} км`)}
+  let best=null;D.markers.forEach(m=>{const d=dist(m,lat,lon);if(!best||d<best.d)best={d,m}});
+  if(best)o.push(best.d===0?`<b style="color:#c00000">⚠ Вы в зоне БПЛА: ${esc(best.m.place)}</b>`:`Ближайшая зона БПЛА: ${esc(best.m.place)}, ~${km(best.d)} км`);
+  else o.push('Активных зон БПЛА нет');
+  if(D.oblast_drone)o.push('Тревога по БПЛА объявлена по всей области');
+  o.push('<span style="color:#777">Ваше положение не отправляется на сервер</span>');
+  el.innerHTML=o.join('<br>');el.style.display='block'}
+$('bme').onclick=()=>{
+  if(userPos){userPos=null;if(userMarker)map.removeLayer(userMarker);userMarker=null;renderMe();$('bme').textContent='📍 Где я';return}
+  if(!navigator.geolocation){alert('Браузер не поддерживает геолокацию');return}
+  navigator.geolocation.getCurrentPosition(p=>{userPos=[p.coords.latitude,p.coords.longitude];
+    userMarker=L.circleMarker(userPos,{radius:7,color:'#fff',weight:2,fillColor:'#1a73e8',fillOpacity:1}).addTo(map);
+    map.setView(userPos,12);$('bme').textContent='✕ Скрыть моё место';renderMe()},
+    ()=>alert('Не удалось определить положение. Разрешите доступ к геолокации для этого сайта в браузере.'),{timeout:10000,maximumAge:30000})};
+// лента
+const feedItems=()=>{const nq=norm(query);return(D?D.feed:[]).filter(f=>(!onlyFresh||f.age<15)&&(!nq||norm(f.text).includes(nq)))};
+function renderFeed(){const it=feedItems(),l=$('list');
+  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':'🟠'}<br>${esc(f.text)}</div>`).join('')||'Ничего не найдено';
+  l.querySelectorAll('.fi').forEach(e=>e.onclick=()=>{const f=it[+e.dataset.i];if(f.lat!=null){map.flyTo([f.lat,f.lon],12);if(innerWidth<700)panel.style.display='none'}})}
+// карта
+function redraw(){if(!D)return;const d=D;layer.clearLayers();
+  const rs={stroke:false,fillColor:'#b00000',fillOpacity:.45};
+  const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
+  const R=d.rocket;
+  if(R){const pop=`<b>Ракетная опасность</b><br>${esc(R.time)}<br>${esc(R.text)}`;
+    if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
+    R.places.forEach(m=>shape(m,rs).bindPopup(`<b>Ракетная опасность: ${esc(m.place)}</b><br>${esc(R.time)}`).addTo(layer))}
+  const ms=d.markers.filter(m=>!onlyFresh||m.age<15);
+  ms.forEach(m=>{const fr=m.age<15,col=fr?'#e00000':'#ff8800',fo=fr?.45:.3;
+    const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
+    if(m.kind==='district'){L.circle([m.lat,m.lon],{radius:m.r_in,color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
+    L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
+    shape(m,{color:col,weight:m.n>1?4:2,fillOpacity:fo}).bindPopup(pop).addTo(layer)});
+  if(first&&layer.getLayers().length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
+  const t=$('tint'),ro=R&&R.oblast;t.style.display=(ro||d.oblast_drone)?'block':'none';
+  t.style.boxShadow=ro?'inset 0 0 0 5px rgba(200,0,0,.75)':'inset 0 0 0 4px rgba(255,136,0,.8)';
+  const bad=(d.status||[]).filter(s=>s.err||s.age===null||s.age>3);
+  let top=bad.length?`<b style="color:#ffd54a">⚠ Нет свежих данных: ${bad.map(s=>esc(s.ch)+(s.age===null?'':' ('+s.age+' мин назад)')).join(', ')}. Карта может быть неполной.</b><br>`:'';
+  if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${esc(R.time)} (МСК)${ro?': вся Белгородская область':''}.</b> `;
+  if(d.oblast_drone)top+=`<b style="color:#ffaa44">Тревога по БПЛА на всей территории области (${esc(d.oblast_drone.time)}).</b> `;
+  $('bar').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}. `+
+    (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
+    '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
+  renderFeed();renderMe()}
 async function refresh(){
-  try{
-    const d=await (await fetch('/api/markers')).json();
-    layer.clearLayers();
-    const rs={stroke:false,fillColor:'#b00000',fillOpacity:.45};
-    const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
-    const R=d.rocket;
-    if(R){const pop=`<b>Ракетная опасность</b><br>${esc(R.time)}<br>${esc(R.text)}`;
-      if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
-      R.places.forEach(m=>shape(m,rs).bindPopup(`<b>Ракетная опасность: ${esc(m.place)}</b><br>${esc(R.time)}`).addTo(layer));}
-    d.markers.forEach(m=>{
-      const fresh=m.age<15,col=fresh?'#e00000':'#ff8800',fo=fresh?.45:.3;
-      const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
-      if(m.kind==='district'){L.circle([m.lat,m.lon],{radius:m.r_in,color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
-      L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
-      shape(m,{color:col,weight:m.n>1?4:2,fillOpacity:fo}).bindPopup(pop).addTo(layer);
-    });
-    if(first&&(d.markers.length||R)){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
-    const t=document.getElementById('tint'),ro=R&&R.oblast;
-    t.style.display=(ro||d.oblast_drone)?'block':'none';
-    t.style.boxShadow=ro?'inset 0 0 0 5px rgba(200,0,0,.75)':'inset 0 0 0 4px rgba(255,136,0,.8)';
-    let top='';
-    if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${R.time} (МСК)${ro?': вся Белгородская область':''}.</b> `;
-    if(d.oblast_drone)top+=`<b style="color:#ffaa44">Тревога по БПЛА на всей территории области (${d.oblast_drone.time}).</b> `;
-    document.getElementById('bar').innerHTML=top+`Зон БПЛА: ${d.markers.length}. Обновлено ${d.updated}. `+
-      (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
-      '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
-  }catch(e){document.getElementById('bar').textContent='Ошибка загрузки'}
-}
+  try{D=await (await fetch('/api/markers')).json();redraw()}
+  catch(e){$('bar').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
 refresh();setInterval(refresh,15000);
 </script></body></html>
