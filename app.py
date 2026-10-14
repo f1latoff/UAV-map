@@ -2,7 +2,7 @@ import os, re, json, time, math, threading
 from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, send_from_directory
 
 CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "BelgorodDRONE,lpr1_Belgorod_alarm,LiveOnlain").split(",") if c.strip()]
 TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько минут зона БПЛА гаснет сама
@@ -13,9 +13,11 @@ UA = "uav-map/1.0 (personal project)"
 MSK = timezone(timedelta(hours=3))  # московское время
 app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
-state = {"last_fetch": 0, "posts": {}, "cold_done": set()}
+state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
+CENTER = {"lat": 50.5997, "lon": 36.5983}
 GEO = "geocache2.json"
-geocache = json.load(open(GEO)) if os.path.exists(GEO) else {}
+geocache = {k: v for k, v in (json.load(open("geocache_seed.json")) if os.path.exists("geocache_seed.json") else {}).items() if v}
+if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн"
@@ -28,6 +30,7 @@ BEL = re.compile(r"^белгород(а|е|у)?$|белгородск\w* рай�
 def fetch_posts(ch, before=None):
     url = f"https://t.me/s/{ch}" + (f"?before={before}" if before else "")
     r = requests.get(url, headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
     out = []
     for m in BeautifulSoup(r.text, "html.parser").select(".tgme_widget_message"):
         t, tm = m.select_one(".tgme_widget_message_text"), m.select_one("time")
@@ -39,19 +42,32 @@ def fetch_posts(ch, before=None):
 
 def refresh_posts():
     for ch in CHANNELS:
+        st = state["status"].setdefault(ch, {"ok": None, "err": True})
         try:
             cold = ch not in state["cold_done"]
             before = None
-            for _ in range(3 if cold else 1):   # при первом запуске читаем 3 страницы назад
+            for n in range(3 if cold else 1):   # при первом запуске читаем 3 страницы назад
                 got = fetch_posts(ch, before)
-                if not got: break
+                if not got:
+                    if n == 0: raise RuntimeError("на странице нет сообщений")
+                    break
                 for p in got: state["posts"][(ch, p["id"])] = p
                 before = min(p["id"] for p in got)
             state["cold_done"].add(ch)
+            st.update(ok=time.time(), err=False)
         except Exception as e:
+            st["err"] = True
             print("fetch error:", ch, e)
     cutoff = time.time() - max(TTL_MIN, ROCKET_TTL) * 60
     state["posts"] = {k: p for k, p in state["posts"].items() if p["ts"] >= cutoff}
+
+def status_out():
+    now = time.time()
+    out = []
+    for ch in CHANNELS:
+        st = state["status"].get(ch, {})
+        out.append({"ch": ch, "err": st.get("err", True), "age": round((now - st["ok"]) / 60) if st.get("ok") else None})
+    return out
 
 def classify(text):
     low = text.lower()
@@ -140,6 +156,7 @@ def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 def build(posts, now=None, geo=geocode, zones=rocket_zones):
     now = now or time.time()
     drone, unknown, oblast_drone = {}, [], None
+    feed = []
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
     for p in sorted(posts, key=lambda p: p["ts"]):
@@ -149,18 +166,20 @@ def build(posts, now=None, geo=geocode, zones=rocket_zones):
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
         places = extract_places(p["text"])
+        fpos = None
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
             rk = fresh_rk()
         elif kind == "rocket":
             rk["last"] = {"time": hhmm, "age": round((now - p["ts"]) / 60), "text": p["text"]}
             if not places:
                 if "област" in low: rk["oblast"] = True
-                else: rk["city"] = True        # без места: Белгород и Белгородский район
+                else:
+                    rk["city"] = True; fpos = CENTER   # без места: Белгород и Белгородский район
             for pl in places:
-                if BEL.search(pl.lower()): rk["city"] = True
+                if BEL.search(pl.lower()): rk["city"] = True; fpos = fpos or CENTER
                 else:
                     pos = geo(pl)
-                    if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}
+                    if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
         elif kind == "clear":
             if not places or re.search(r"ранее|тревог|объявлен|вся|всей|всех", low):
                 drone, unknown, oblast_drone = {}, [], None
@@ -173,16 +192,19 @@ def build(posts, now=None, geo=geocode, zones=rocket_zones):
                 pos = geo(pl)
                 if not pos:
                     unknown.append({"place": pl, "time": hhmm}); continue
+                fpos = fpos or pos
                 z = drone.get(zkey(pos))
                 if z: z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
                 else: drone[zkey(pos)] = {**pos, "place": pl, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm}
+        feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "text": p["text"][:220],
+                     "lat": fpos["lat"] if fpos else None, "lon": fpos["lon"] if fpos else None})
     marks = [{**{k: v for k, v in z.items() if k not in ("sources", "last")},
               "age": round((now - z["last"]) / 60), "n": len(z["sources"])} for z in drone.values()]
     rocket = None
     if rk["city"] or rk["oblast"] or rk["places"]:
         rocket = {**rk["last"], "city": rk["city"], "oblast": rk["oblast"], "places": list(rk["places"].values()),
                   "zones": zones() if rk["city"] else None}
-    return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone,
+    return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone, "feed": feed[::-1][:40], "status": status_out(),
             "updated": datetime.now(MSK).strftime("%H:%M:%S")}
 
 @app.route("/api/markers")
@@ -192,6 +214,11 @@ def markers():
             refresh_posts()
             state["last_fetch"] = time.time()
         return jsonify(build(list(state["posts"].values())))
+
+@app.route("/api/geocache")
+def geocache_dump():   # скачать найденные места, чтобы положить в репозиторий как geocache_seed.json
+    body = json.dumps({k: v for k, v in geocache.items() if v}, ensure_ascii=False)
+    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=geocache_seed.json"})
 
 @app.route("/")
 def index(): return send_from_directory("static", "index.html")
