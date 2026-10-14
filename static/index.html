@@ -3,42 +3,60 @@
 <title>Карта оповещений БПЛА</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>body{margin:0;font-family:sans-serif}#map{height:calc(100vh - 70px)}
-#bar{height:70px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}</style></head>
-<body><div id="bar">Загрузка…</div><div id="map"></div>
+<style>body{margin:0;font-family:sans-serif}
+#bar{height:78px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}
+#wrap{position:relative;height:calc(100vh - 78px)}#map{height:100%}
+#tint{position:absolute;inset:0;pointer-events:none;z-index:500;display:none}
+.lg{background:#fff;border-radius:6px;box-shadow:0 1px 4px #0006;font-size:12px;line-height:1.6;max-width:240px}
+.lh{padding:6px 10px;font-weight:bold;cursor:pointer}.lb{padding:0 10px 8px;max-height:45vh;overflow:auto}</style></head>
+<body><div id="bar">Загрузка…</div><div id="wrap"><div id="map"></div><div id="tint"></div></div>
 <script>
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const map=L.map('map').setView([50.6,36.6],9);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
 const layer=L.layerGroup().addTo(map);let first=true;
 const lg=L.control({position:'bottomleft'});
-lg.onAdd=()=>{const d=L.DomUtil.create('div');
-  d.style.cssText='background:#fff;padding:8px 10px;border-radius:6px;font-size:12px;line-height:1.7;box-shadow:0 1px 4px #0006;max-width:250px';
-  d.innerHTML='<b>Обозначения</b><br>'+
-  '<span style="color:#e00000">■</span> Красная заливка: свежее оповещение (до 15 мин)<br>'+
-  '<span style="color:#ff8800">■</span> Оранжевая заливка: старше 15 мин, ждём отбоя<br>'+
-  '<span style="color:#999">◌</span> Бледный пунктирный круг: возможная зона риска (+1 км)<br>'+
-  '▭ Контур: территория села или посёлка<br>'+
-  '○ Круг 1,5 км: объект или улица<br>○ Круг 2 км: район города<br>'+
-  '<span style="color:#8b0000">■</span> Тёмно-красная заливка: ракетная опасность (весь Белгород и Белгородский район)';
-  return d};lg.addTo(map);
+lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
+  c.innerHTML='<div class="lh">ⓘ Обозначения</div><div class="lb">'+
+  '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br>'+
+  '<span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
+  '<span style="color:#999">◌</span> Пунктир: возможная зона риска (+1 км)<br>'+
+  '▭ Контур: село или посёлок<br>○ Круг 1,5 км: объект или улица<br>'+
+  '<span style="color:#e99">●</span> Бледная заливка: район<br>'+
+  '<b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
+  '<span style="color:#8b0000">■</span> Тёмно-красный: ракетная опасность<br>'+
+  '<span style="color:#c00">▢</span> Красная рамка вокруг карты: ракетная опасность по всей области<br>'+
+  '<span style="color:#f80">▢</span> Оранжевая рамка: тревога БПЛА по всей области</div>';
+  L.DomEvent.disableClickPropagation(c);
+  const b=c.querySelector('.lb');b.style.display=innerWidth<700?'none':'block';
+  c.querySelector('.lh').onclick=()=>{b.style.display=b.style.display==='none'?'block':'none'};
+  return c};lg.addTo(map);
 async function refresh(){
   try{
     const d=await (await fetch('/api/markers')).json();
     layer.clearLayers();
-    if(d.rocket){const st={color:'#8b0000',weight:2,fillColor:'#b00000',fillOpacity:.4};
-      const pop=`<b>Ракетная опасность</b><br>${d.rocket.time}<br>${d.rocket.text}`;
-      (d.rocket.zones?d.rocket.zones.map(g=>L.geoJSON(g,{style:st})):[L.circle([50.5997,36.5983],{...st,radius:25000})])
-        .forEach(l=>l.bindPopup(pop).addTo(layer));}
+    const rs={stroke:false,fillColor:'#b00000',fillOpacity:.45};
+    const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
+    const R=d.rocket;
+    if(R){const pop=`<b>Ракетная опасность</b><br>${esc(R.time)}<br>${esc(R.text)}`;
+      if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
+      R.places.forEach(m=>shape(m,rs).bindPopup(`<b>Ракетная опасность: ${esc(m.place)}</b><br>${esc(R.time)}`).addTo(layer));}
     d.markers.forEach(m=>{
       const fresh=m.age<15,col=fresh?'#e00000':'#ff8800',fo=fresh?.45:.3;
+      const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
+      if(m.kind==='district'){L.circle([m.lat,m.lon],{radius:m.r_in,color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
       L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
-      const inner=m.poly?L.geoJSON(m.poly,{style:{color:col,weight:2,fillOpacity:fo}})
-                        :L.circle([m.lat,m.lon],{radius:m.r_in,color:col,weight:2,fillOpacity:fo});
-      inner.bindPopup(`<b>${m.place}</b><br>${m.time} (${m.age} мин назад)<br>${m.text}`).addTo(layer);
+      shape(m,{color:col,weight:m.n>1?4:2,fillOpacity:fo}).bindPopup(pop).addTo(layer);
     });
-    if(first&&(d.markers.length||d.rocket)){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
-    document.getElementById('bar').innerHTML=(d.rocket?`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${d.rocket.time} (МСК).</b> `:'')+`Активных меток: ${d.markers.length}. Обновлено ${d.updated}. `+
-      (d.unknown.length?`Место не определено: ${d.unknown.map(u=>u.place).join('; ')}. `:'')+
+    if(first&&(d.markers.length||R)){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
+    const t=document.getElementById('tint'),ro=R&&R.oblast;
+    t.style.display=(ro||d.oblast_drone)?'block':'none';
+    t.style.boxShadow=ro?'inset 0 0 0 5px rgba(200,0,0,.75)':'inset 0 0 0 4px rgba(255,136,0,.8)';
+    let top='';
+    if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${R.time} (МСК)${ro?': вся Белгородская область':''}.</b> `;
+    if(d.oblast_drone)top+=`<b style="color:#ffaa44">Тревога по БПЛА на всей территории области (${d.oblast_drone.time}).</b> `;
+    document.getElementById('bar').innerHTML=top+`Зон БПЛА: ${d.markers.length}. Обновлено ${d.updated}. `+
+      (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
       '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
   }catch(e){document.getElementById('bar').textContent='Ошибка загрузки'}
 }
