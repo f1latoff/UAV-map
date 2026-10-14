@@ -109,7 +109,9 @@ def shape(r, q):
     size = max((bb[1] - bb[0]) * 111, (bb[3] - bb[2]) * 111 * math.cos(math.radians(lat)))  # км
     t, gj = r.get("type", ""), r.get("geojson") or {}
     poly = gj if gj.get("type") in ("Polygon", "MultiPolygon") else None
-    if "район" in q.lower():
+    if "район" in q.lower():   # район целиком: настоящий контур (бледная заливка), а если контура нет, круг
+        if poly and size <= 150:
+            return {"lat": lat, "lon": lon, "kind": "district", "poly": poly, "r_in": None, "r_out": 0}
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
     if t in SETTLE and size <= 12:   # село/посёлок: своя территория
         if poly:
@@ -136,7 +138,7 @@ def candidates(q):
     try:
         r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
             params={"q": f"{q}, {REGION}", "format": "json", "limit": 5, "viewbox": VIEWBOX, "bounded": 1,
-                    "polygon_geojson": 1, "polygon_threshold": 0.0005}).json()
+                    "polygon_geojson": 1, "polygon_threshold": 0.003 if "район" in q.lower() else 0.0005}).json()
         time.sleep(1.1)
     except Exception:
         return []
