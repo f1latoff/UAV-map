@@ -1,4 +1,4 @@
-import os, re, json, time, threading
+import os, re, json, time, math, threading
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
@@ -12,7 +12,7 @@ UA = "uav-map/1.0 (personal project)"
 app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": []}
-GEO = "geocache.json"
+GEO = "geocache2.json"
 geocache = json.load(open(GEO)) if os.path.exists(GEO) else {}
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}  # {"малинов": [lat, lon]}
 
@@ -43,18 +43,41 @@ def extract_places(text):
 
 def stems(s): return {w[:5] for w in re.findall(r"\w+", s.lower().replace("ё", "е")) if len(w) > 3}
 
+SETTLE = {"village", "hamlet", "town", "isolated_dwelling", "locality", "farm", "allotments"}
+DISTRICT = {"suburb", "quarter", "neighbourhood", "city", "administrative", "residential"}
+
+def shape(r, q):
+    lat, lon = float(r["lat"]), float(r["lon"])
+    bb = [float(x) for x in r.get("boundingbox", [lat, lat, lon, lon])]  # юг, север, запад, восток
+    size = max((bb[1] - bb[0]) * 111, (bb[3] - bb[2]) * 111 * math.cos(math.radians(lat)))  # км
+    t, gj = r.get("type", ""), r.get("geojson") or {}
+    poly = gj if gj.get("type") in ("Polygon", "MultiPolygon") else None
+    if "район" in q.lower():
+        return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
+    if t in SETTLE and size <= 12:   # село/посёлок: своя территория
+        if poly:
+            return {"lat": lat, "lon": lon, "kind": "settlement", "poly": poly, "r_in": None, "r_out": size * 500 + 1000}
+        r_in = min(3000, max(1000, size * 500))
+        return {"lat": lat, "lon": lon, "kind": "settlement", "r_in": r_in, "r_out": r_in + 1000}
+    if t in DISTRICT or size > 12:
+        return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
+    return {"lat": lat, "lon": lon, "kind": "object", "r_in": 1500, "r_out": 2500}
+
 def geocode(q):
     low = q.lower()
-    for k, v in manual.items():
-        if k in low: return v
+    for k, v in manual.items():   # places.json: [широта, долгота] или [широта, долгота, радиус_в_метрах]
+        if k in low:
+            rad = v[2] if len(v) > 2 else 1500
+            return {"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": rad + 1000}
     if low in geocache: return geocache[low]
     try:
         r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
-            params={"q": f"{q}, {REGION}", "format": "json", "limit": 1, "viewbox": VIEWBOX, "bounded": 1}).json()
+            params={"q": f"{q}, {REGION}", "format": "json", "limit": 1, "viewbox": VIEWBOX, "bounded": 1,
+                    "polygon_geojson": 1, "polygon_threshold": 0.0005}).json()
         time.sleep(1.1)
     except Exception:
         return None
-    res = [float(r[0]["lat"]), float(r[0]["lon"])] if r else None
+    res = shape(r[0], q) if r else None
     geocache[low] = res
     json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     return res
@@ -76,7 +99,7 @@ def build(posts, now=None, geo=geocode):
             for place in extract_places(p["text"]):
                 pos = geo(place)
                 item = {"place": place, "time": datetime.fromtimestamp(p["ts"]).strftime("%H:%M"), "text": p["text"]}
-                if pos: active.append({**item, "lat": pos[0], "lon": pos[1]})
+                if pos: active.append({**item, **pos, "age": round((now - p["ts"]) / 60)})
                 else: unknown.append(item)
     return {"markers": active, "unknown": unknown, "updated": datetime.now().strftime("%H:%M:%S")}
 
