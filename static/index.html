@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="БПЛА 31">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#222222">
+<script>(function(){try{var m=localStorage.getItem('theme')||'auto';if(m==='dark'||(m==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()</script>
 <meta property="og:type" content="website">
 <meta property="og:title" content="БПЛА 31: карта оповещений Белгородской области">
 <meta property="og:description" content="Неофициальная карта оповещений о БПЛА и ракетной опасности по открытым источникам">
@@ -31,9 +32,45 @@
 #list{overflow:auto;padding:4px 8px;font-size:13px}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}#pwa{position:absolute;z-index:700;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));display:none;background:#fff;border-radius:10px;box-shadow:0 2px 12px #0008;padding:12px 30px 12px 14px;font-size:14px;line-height:1.5}
 #pwa b{display:block;font-size:15px;margin-bottom:4px}#pwa button{margin-top:8px;padding:9px 14px;font-size:14px;border:0;border-radius:6px;background:#1a73e8;color:#fff;cursor:pointer}
 #pwa .x{position:absolute;top:2px;right:6px;margin:0;padding:4px 8px;background:none;color:#666;font-size:22px}#pwa svg{vertical-align:-3px}
+.tb .row{display:flex;gap:4px}.tb .row button{flex:1;margin:2px 0;padding:7px 4px;font-size:12.5px}
+#about{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:16px}
+#about .ab{position:relative;background:#fff;color:#222;max-width:560px;width:100%;border-radius:12px;padding:18px 20px 14px;font-size:14px;line-height:1.55;margin:auto 0}
+#about h2{margin:0 26px 8px 0;font-size:19px}#about h3{margin:14px 0 4px;font-size:15px}#about p{margin:6px 0}
+#about .warn{background:#fff4e5;border-left:4px solid #f80;padding:8px 10px;border-radius:4px}
+#about .abx{position:absolute;top:6px;right:10px;background:none;border:0;font-size:26px;cursor:pointer;color:#666}
+#about a{color:#1a73e8}.small{color:#777;font-size:12px}
+.dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
+.dark .lg,.dark .tb{background:#1f2430;color:#e8e8e8}.dark .tb button{background:#2a3040;color:#8ab4ff;border-color:#3a4256}
+.dark #panel{background:#1b1f2a;color:#e6e6e6}.dark #ph{border-color:#333b4d}
+.dark #ph input[type=text]{background:#2a3040;color:#eee;border:1px solid #3a4256}.dark .fi{border-color:#2d3446}
+.dark .leaflet-popup-content-wrapper,.dark .leaflet-popup-tip{background:#1f2430;color:#e8e8e8}
+.dark .leaflet-bar a{background:#1f2430;color:#e8e8e8;border-color:#3a4256}
+.dark .leaflet-control-attribution{background:rgba(20,24,34,.8)!important;color:#aaa}.dark .leaflet-control-attribution a{color:#8ab4ff}
+.dark #pwa{background:#1f2430;color:#e8e8e8}.dark #pwa .x{color:#aaa}
+.dark #about .ab{background:#1f2430;color:#e8e8e8}.dark #about .warn{background:#3a2d17}.dark #about a{color:#8ab4ff}
+.dark .small{color:#999}.dark #about .abx{color:#aaa}
 </style></head>
 <body><div id="bar">Загрузка…</div>
 <div id="wrap"><div id="map"></div><div id="tint"></div><div id="pwa"></div>
+<div id="about"><div class="ab"><button class="abx" id="abx" aria-label="Закрыть">×</button>
+<h2>О проекте «БПЛА 31»</h2>
+<p>Неофициальная карта оповещений о БПЛА и ракетной опасности по Белгородской области. Информация собирается автоматически из открытых Telegram-каналов и показывается на карте.</p>
+<p class="warn"><b>Важно.</b> Это не официальный источник. Данные приблизительные, могут быть неточными или приходить с задержкой. Карта не заменяет официальные оповещения. Следуйте указаниям МЧС и местных властей. Официальная информация: <a href="https://31.mchs.gov.ru" target="_blank" rel="noopener">ГУ МЧС России по Белгородской области</a>.</p>
+<h3>Как читать карту</h3>
+<p>Красным показаны свежие оповещения (до 15 минут), оранжевым более старые. Зона обозначает примерное место, а не точную траекторию. Подробности в разделе «Обозначения».</p>
+<h3>Как это работает</h3>
+<p>Сайт каждые несколько секунд читает каналы, находит в сообщениях названия мест и рисует зоны. Зона исчезает после сообщения об отбое. Если отбоя нет, она гаснет сама через 40 минут (ракетная опасность через 2 часа).</p>
+<h3>Ограничения</h3>
+<p>В сообщениях названия бывают искажены, поэтому иногда зона может встать неточно или место не определится. Размер зон условный.</p>
+<h3>Источники данных</h3>
+<p>Сообщения из открытых Telegram-каналов, права на них принадлежат авторам каналов. Места определяются по данным OpenStreetMap, карта © участники OpenStreetMap.</p>
+<h3>Конфиденциальность</h3>
+<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет.</p>
+<h3>Установка как приложения</h3>
+<p>iPhone: в Safari нажмите «Поделиться» → «На экран “Домой”». Android: кнопка «Установить» в браузере.</p>
+<h3>Связь</h3>
+<p>Нашли ошибку или есть вопрос? Telegram: <a href="https://t.me/f1latoffr" target="_blank" rel="noopener">@f1latoffr</a></p>
+<p class="small">Проект предоставляется «как есть», без гарантий.</p></div></div>
 <div id="panel"><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
 <label><input type="checkbox" id="fr"> только свежие (до 15 мин)</label>
 <a href="#" id="pc" style="float:right;text-decoration:none">✕ закрыть</a></div><div id="list"></div></div></div>
@@ -59,7 +96,7 @@ lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
 // кнопки «Где я» и «Лента»
 const tb=L.control({position:'topright'});
 tb.onAdd=()=>{const c=L.DomUtil.create('div','tb');
-  c.innerHTML='<button id="bme">📍 Где я</button><button id="bfeed">☰ Лента и поиск</button><div id="me"></div>';
+  c.innerHTML='<button id="bme">📍 Где я</button><button id="bfeed">☰ Лента и поиск</button><div class="row"><button id="bth"></button><button id="bab">ℹ️ О проекте</button></div><div id="me"></div>';
   L.DomEvent.disableClickPropagation(c);return c};tb.addTo(map);
 $('bfeed').onclick=()=>{panel.style.display=panel.style.display==='flex'?'none':'flex'};
 $('pc').onclick=e=>{e.preventDefault();panel.style.display='none'};
@@ -129,6 +166,20 @@ async function refresh(){
   catch(e){$('bar').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
 refresh();setInterval(refresh,15000);
 
+// тема (Авто / Ночь / День) и окно «О проекте»
+(function(){
+  const mq=matchMedia('(prefers-color-scheme: dark)'),bth=$('bth'),LAB={auto:'🌓 Авто',dark:'🌙 Ночь',light:'☀️ День'};
+  let mode='auto';try{mode=localStorage.getItem('theme')||'auto'}catch(e){}
+  if(!LAB[mode])mode='auto';
+  const apply=()=>{const dark=mode==='dark'||(mode==='auto'&&mq.matches);document.documentElement.classList.toggle('dark',dark);
+    const m=document.querySelector('meta[name=theme-color]');if(m)m.content=dark?'#111418':'#222222';
+    bth.textContent=LAB[mode];bth.title='Тема: '+LAB[mode]};
+  bth.onclick=()=>{mode={auto:'dark',dark:'light',light:'auto'}[mode];try{localStorage.setItem('theme',mode)}catch(e){}apply()};
+  if(mq.addEventListener)mq.addEventListener('change',apply);else mq.addListener(apply);
+  apply();
+  const ab=$('about');$('bab').onclick=()=>{ab.style.display='flex'};$('abx').onclick=()=>{ab.style.display='none'};
+  ab.onclick=e=>{if(e.target===ab)ab.style.display='none'};
+})();
 // установка как приложение
 (function(){
   const KEY='pwaHideUntil',WEEK=7*864e5,ua=navigator.userAgent,el=document.getElementById('pwa');
