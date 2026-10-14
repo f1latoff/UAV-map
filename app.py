@@ -1,5 +1,5 @@
 import os, re, json, time, math, threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, send_from_directory
@@ -9,6 +9,7 @@ TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько
 REGION = os.getenv("REGION", "Белгородская область")  # добавляется к поиску места
 VIEWBOX = os.getenv("VIEWBOX", "34.9,51.5,38.5,49.8") # рамка поиска: запад,север,восток,юг
 UA = "uav-map/1.0 (personal project)"
+MSK = timezone(timedelta(hours=3))  # московское время (Белгород)
 app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": []}
@@ -98,10 +99,10 @@ def build(posts, now=None, geo=geocode):
         elif kind == "alert":
             for place in extract_places(p["text"]):
                 pos = geo(place)
-                item = {"place": place, "time": datetime.fromtimestamp(p["ts"]).strftime("%H:%M"), "text": p["text"]}
+                item = {"place": place, "time": datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M"), "text": p["text"]}
                 if pos: active.append({**item, **pos, "age": round((now - p["ts"]) / 60)})
                 else: unknown.append(item)
-    return {"markers": active, "unknown": unknown, "updated": datetime.now().strftime("%H:%M:%S")}
+    return {"markers": active, "unknown": unknown, "updated": datetime.now(MSK).strftime("%H:%M:%S")}
 
 @app.route("/api/markers")
 def markers():
