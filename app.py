@@ -218,6 +218,15 @@ def markers():
             state["last_fetch"] = time.time()
         return jsonify(build(list(state["posts"].values())))
 
+@app.route("/manifest.webmanifest")
+def manifest(): return send_from_directory("static", "manifest.webmanifest", mimetype="application/manifest+json")
+
+@app.route("/sw.js")
+def service_worker():
+    r = send_from_directory("static", "sw.js", mimetype="application/javascript")
+    r.headers["Cache-Control"] = "no-cache"
+    return r
+
 @app.route("/api/geocache")
 def geocache_dump():   # скачать найденные места, чтобы положить в репозиторий как geocache_seed.json
     body = json.dumps({k: v for k, v in geocache.items() if v}, ensure_ascii=False)
