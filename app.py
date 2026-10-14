@@ -33,11 +33,14 @@ def fetch_posts(ch, before=None):
     r.raise_for_status()
     out = []
     for m in BeautifulSoup(r.text, "html.parser").select(".tgme_widget_message"):
-        t, tm = m.select_one(".tgme_widget_message_text"), m.select_one("time")
-        if t and tm and m.get("data-post"):
+        try:   # одно «кривое» сообщение не должно ломать весь канал
+            t, tm = m.select_one(".tgme_widget_message_text"), m.select_one("time[datetime]")
+            if not (t and tm and m.get("data-post")): continue
             for br in t.find_all("br"): br.replace_with("\n")
             out.append({"ch": ch, "id": int(m["data-post"].split("/")[-1]), "text": t.get_text().strip(),
                         "ts": datetime.fromisoformat(tm["datetime"]).timestamp()})
+        except Exception as e:
+            print("skip message:", ch, e)
     return out
 
 def refresh_posts():
