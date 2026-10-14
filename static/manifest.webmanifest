@@ -1,0 +1,17 @@
+{
+  "name": "Карта оповещений БПЛА Белгород",
+  "short_name": "БПЛА 31",
+  "description": "Неофициальная карта оповещений о БПЛА и ракетной опасности по открытым источникам",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B1F4B",
+  "theme_color": "#222222",
+  "lang": "ru",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

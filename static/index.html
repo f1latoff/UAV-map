@@ -1,6 +1,18 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Карта оповещений БПЛА</title>
+<title>БПЛА 31: карта оповещений</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="БПЛА 31">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#222222">
+<meta property="og:type" content="website">
+<meta property="og:title" content="БПЛА 31: карта оповещений Белгородской области">
+<meta property="og:description" content="Неофициальная карта оповещений о БПЛА и ракетной опасности по открытым источникам">
+<meta property="og:image" content="https://uav-map-kidc.onrender.com/static/icon-512.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh}
@@ -16,9 +28,12 @@
 @media(max-width:699px){.tb button{padding:11px 8px;font-size:15px}.lh{padding:11px 12px;font-size:14px}.lb{font-size:13px}.leaflet-bottom{margin-bottom:env(safe-area-inset-bottom)}}
 @media(min-width:700px){#panel{left:auto;width:380px;top:0;max-height:none}}
 #ph{padding:8px;border-bottom:1px solid #ddd;font-size:13px}#ph input[type=text]{width:100%;box-sizing:border-box;padding:6px;margin-bottom:4px}
-#list{overflow:auto;padding:4px 8px;font-size:13px}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}</style></head>
+#list{overflow:auto;padding:4px 8px;font-size:13px}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}#pwa{position:absolute;z-index:700;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));display:none;background:#fff;border-radius:10px;box-shadow:0 2px 12px #0008;padding:12px 30px 12px 14px;font-size:14px;line-height:1.5}
+#pwa b{display:block;font-size:15px;margin-bottom:4px}#pwa button{margin-top:8px;padding:9px 14px;font-size:14px;border:0;border-radius:6px;background:#1a73e8;color:#fff;cursor:pointer}
+#pwa .x{position:absolute;top:2px;right:6px;margin:0;padding:4px 8px;background:none;color:#666;font-size:22px}#pwa svg{vertical-align:-3px}
+</style></head>
 <body><div id="bar">Загрузка…</div>
-<div id="wrap"><div id="map"></div><div id="tint"></div>
+<div id="wrap"><div id="map"></div><div id="tint"></div><div id="pwa"></div>
 <div id="panel"><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
 <label><input type="checkbox" id="fr"> только свежие (до 15 мин)</label>
 <a href="#" id="pc" style="float:right;text-decoration:none">✕ закрыть</a></div><div id="list"></div></div></div>
@@ -113,4 +128,30 @@ async function refresh(){
   try{D=await (await fetch('/api/markers')).json();redraw()}
   catch(e){$('bar').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
 refresh();setInterval(refresh,15000);
+
+// установка как приложение
+(function(){
+  const KEY='pwaHideUntil',WEEK=7*864e5,ua=navigator.userAgent,el=document.getElementById('pwa');
+  const SHARE='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4M5 11v9h14v-9"/></svg>';
+  const PLUS='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>';
+  const standalone=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
+  const isIOS=/iPhone|iPad|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const hidden=()=>{try{return Date.now()<+localStorage.getItem(KEY)}catch(e){return false}};
+  const hide=()=>{el.style.display='none';try{localStorage.setItem(KEY,Date.now()+WEEK)}catch(e){}};
+  const show=html=>{el.innerHTML='<button class="x" aria-label="Закрыть">×</button>'+html;el.style.display='block';
+    el.querySelector('.x').onclick=hide;const ok=el.querySelector('.ok');if(ok)ok.onclick=hide};
+  if(standalone||hidden())return;
+  if(isIOS){
+    const safari=/Safari/.test(ua)&&!/CriOS|FxiOS|EdgiOS|OPiOS|YaBrowser/.test(ua);
+    setTimeout(()=>show(safari
+      ?`<b>Установите как приложение «БПЛА 31»</b>Нажмите ${SHARE} «Поделиться», затем «На экран “Домой”» ${PLUS}. Приложение откроется на весь экран, без адресной строки.<br><button class="ok">Понятно</button>`
+      :`<b>Установите как приложение</b>Откройте этот сайт в браузере Safari, затем нажмите «Поделиться» → «На экран “Домой”».<br><button class="ok">Понятно</button>`),3000);
+  }
+  if(/Android/.test(ua))window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();setTimeout(()=>{
+    show('<b>Установите приложение «БПЛА 31»</b>Откроется на весь экран, как обычное приложение.<br><button class="inst">Установить</button>');
+    el.querySelector('.inst').onclick=async()=>{el.style.display='none';e.prompt();await e.userChoice}},3000)});
+  window.addEventListener('appinstalled',()=>{el.style.display='none'});
+})();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script></body></html>
