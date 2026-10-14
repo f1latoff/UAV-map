@@ -210,7 +210,8 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones):
                 ss = set().union(*[stems(x) for x in places])
                 drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
         elif kind == "alert":
-            if re.search(r"всей территории|по всей области", low): oblast_drone = {"time": hhmm}
+            if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
+                oblast_drone = {"time": hhmm}   # тревога по всей области: плашка и оранжевая рамка, без заливки
             pk = resolve(places, geo)
             for pl in places:
                 pos = pk.get(pl)
