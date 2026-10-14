@@ -20,10 +20,16 @@ geocache = {k: v for k, v in (json.load(open("geocache_seed.json")) if os.path.e
 if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 
-STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн"
+STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала")
-NEIGH = r"курск|воронеж|липецк|харьков|област|километр"
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b")
+NEIGH = r"курск|воронеж|липецк|харьков|област"
+KM = re.compile(r"\d+\W*(?:й|ый|ой)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
+ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
+    (re.compile(r"(?<!\d)26\W*(?:й|ый|ой)?\W*(?:километр|км)", re.I), 50.542511, 36.479119, 2000),   # М-2, подъезд к Белгороду, 26-й км
+    (re.compile(r"\bбабочк\w*", re.I), 50.568621, 36.460408, 1000),                                    # развязка «Бабочка» (М-2, 674-й км)
+    (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 1000),                           # кольцо «Я люблю Белгород»
+]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
 BEL = re.compile(r"^белгород(а|е|у)?$|белгородск\w* район")
 
@@ -84,7 +90,7 @@ def extract_places(text):
     t = re.sub(r"^\s*(внимание|отбой)[,!.:\s]*", "", text, flags=re.I)
     head = re.split(STOP, t, maxsplit=1, flags=re.I)[0]
     out = []
-    for p in re.split(r"[\n,;.!]|\bтакже\b|\bи\b", head):
+    for p in re.split(r"[\n,;:.!]|\bтакже\b|\bи\b", head):
         p = re.sub(r"\s+", " ", re.sub(NOISE, " ", p, flags=re.I)).strip(" \"'«»-")
         if len(p) > 2 and not re.search(NEIGH, p, re.I):
             if "районы" in text.lower() and "район" not in p.lower() and re.search(r"(ий|ый|ой)$", p):
@@ -121,6 +127,9 @@ def candidates(q):
         if k in low:
             rad = v[2] if len(v) > 2 else 1500
             return [{"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
+    for rx, la, lo, rad in ALIASES:
+        if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
+    if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
     if low in geocache:
         c = geocache[low]
         return [c] if isinstance(c, dict) else (c or [])
@@ -216,6 +225,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones):
             for pl in places:
                 pos = pk.get(pl)
                 if not pos:
+                    if KM.search(pl) and any(pk.get(x) for x in places): continue   # километр уточняет найденное место рядом
                     unknown.append({"place": pl, "time": hhmm}); continue
                 fpos = fpos or pos
                 z = drone.get(zkey(pos))
