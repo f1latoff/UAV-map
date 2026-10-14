@@ -18,12 +18,17 @@ lg.onAdd=()=>{const d=L.DomUtil.create('div');
   '<span style="color:#ff8800">■</span> Оранжевая заливка: старше 15 мин, ждём отбоя<br>'+
   '<span style="color:#999">◌</span> Бледный пунктирный круг: возможная зона риска (+1 км)<br>'+
   '▭ Контур: территория села или посёлка<br>'+
-  '○ Круг 1,5 км: объект или улица<br>○ Круг 2 км: район города';
+  '○ Круг 1,5 км: объект или улица<br>○ Круг 2 км: район города<br>'+
+  '<span style="color:#8b0000">■</span> Тёмно-красная заливка: ракетная опасность (весь Белгород и Белгородский район)';
   return d};lg.addTo(map);
 async function refresh(){
   try{
     const d=await (await fetch('/api/markers')).json();
     layer.clearLayers();
+    if(d.rocket){const st={color:'#8b0000',weight:2,fillColor:'#b00000',fillOpacity:.4};
+      const pop=`<b>Ракетная опасность</b><br>${d.rocket.time}<br>${d.rocket.text}`;
+      (d.rocket.zones?d.rocket.zones.map(g=>L.geoJSON(g,{style:st})):[L.circle([50.5997,36.5983],{...st,radius:25000})])
+        .forEach(l=>l.bindPopup(pop).addTo(layer));}
     d.markers.forEach(m=>{
       const fresh=m.age<15,col=fresh?'#e00000':'#ff8800',fo=fresh?.45:.3;
       L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
@@ -31,8 +36,8 @@ async function refresh(){
                         :L.circle([m.lat,m.lon],{radius:m.r_in,color:col,weight:2,fillOpacity:fo});
       inner.bindPopup(`<b>${m.place}</b><br>${m.time} (${m.age} мин назад)<br>${m.text}`).addTo(layer);
     });
-    if(first&&d.markers.length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
-    document.getElementById('bar').innerHTML=`Активных меток: ${d.markers.length}. Обновлено ${d.updated}. `+
+    if(first&&(d.markers.length||d.rocket)){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
+    document.getElementById('bar').innerHTML=(d.rocket?`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${d.rocket.time} (МСК).</b> `:'')+`Активных меток: ${d.markers.length}. Обновлено ${d.updated}. `+
       (d.unknown.length?`Место не определено: ${d.unknown.map(u=>u.place).join('; ')}. `:'')+
       '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
   }catch(e){document.getElementById('bar').textContent='Ошибка загрузки'}
