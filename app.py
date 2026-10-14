@@ -5,22 +5,24 @@ from bs4 import BeautifulSoup
 from flask import Flask, jsonify, send_from_directory
 
 CHANNEL = os.getenv("CHANNEL", "BelgorodDRONE")
-TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько минут метка исчезает сама
+TTL_MIN = int(os.getenv("TTL_MIN", "40"))
+ROCKET_TTL = int(os.getenv("ROCKET_TTL", "120"))  # минут, если не пришёл отбой ракетной опасности            # через сколько минут метка исчезает сама
 REGION = os.getenv("REGION", "Белгородская область")  # добавляется к поиску места
 VIEWBOX = os.getenv("VIEWBOX", "34.9,51.5,38.5,49.8") # рамка поиска: запад,север,восток,юг
 UA = "uav-map/1.0 (personal project)"
 MSK = timezone(timedelta(hours=3))  # московское время (Белгород)
 app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
-state = {"last_fetch": 0, "posts": []}
+state = {"last_fetch": 0, "posts": {}}
 GEO = "geocache2.json"
 geocache = json.load(open(GEO)) if os.path.exists(GEO) else {}
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}  # {"малинов": [lat, lon]}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн"
 
-def fetch_posts():
-    r = requests.get(f"https://t.me/s/{CHANNEL}", headers={"User-Agent": UA}, timeout=15)
+def fetch_posts(before=None):
+    url = f"https://t.me/s/{CHANNEL}" + (f"?before={before}" if before else "")
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=15)
     out = []
     for m in BeautifulSoup(r.text, "html.parser").select(".tgme_widget_message"):
         t, tm = m.select_one(".tgme_widget_message_text"), m.select_one("time")
@@ -30,8 +32,22 @@ def fetch_posts():
                         "ts": datetime.fromisoformat(tm["datetime"]).timestamp()})
     return out
 
+def refresh_posts():
+    if not state["posts"]:   # первый запуск: читаем 3 страницы назад
+        before = None
+        for _ in range(3):
+            got = fetch_posts(before)
+            if not got: break
+            for p in got: state["posts"][p["id"]] = p
+            before = min(p["id"] for p in got)
+    else:
+        for p in fetch_posts(): state["posts"][p["id"]] = p
+    cutoff = time.time() - max(TTL_MIN, ROCKET_TTL) * 60
+    state["posts"] = {i: p for i, p in state["posts"].items() if p["ts"] >= cutoff}
+
 def classify(text):
     low = text.lower()
+    if "ракетн" in low: return "rocket_clear" if "отбой" in low else "rocket"
     if "отбой" in low: return "clear"
     if "внимание" in low or re.search(r"дрон|бпла|беспилот", low): return "alert"
     return None
@@ -83,13 +99,40 @@ def geocode(q):
     json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     return res
 
-def build(posts, now=None, geo=geocode):
+def rocket_zones():
+    if geocache.get("__rocket__"): return geocache["__rocket__"]
+    polys = []
+    for q in ("Белгород", "Белгородский район"):
+        try:
+            r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
+                params={"q": f"{q}, {REGION}", "format": "json", "limit": 3, "viewbox": VIEWBOX, "bounded": 1,
+                        "polygon_geojson": 1, "polygon_threshold": 0.001}).json()
+            time.sleep(1.1)
+        except Exception:
+            continue
+        for x in r:
+            g = x.get("geojson") or {}
+            if g.get("type") in ("Polygon", "MultiPolygon"):
+                polys.append(g); break
+    if polys:
+        geocache["__rocket__"] = polys
+        json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+        return polys
+    return None   # тогда на сайте рисуется запасной круг 25 км вокруг Белгорода
+
+def build(posts, now=None, geo=geocode, zones=rocket_zones):
     now = now or time.time()
-    active, unknown = [], []
+    active, unknown, rocket = [], [], None
     for p in sorted(posts, key=lambda p: p["id"]):
-        if now - p["ts"] > TTL_MIN * 60: continue
         kind = classify(p["text"])
-        if kind == "clear":
+        ttl = ROCKET_TTL if kind and kind.startswith("rocket") else TTL_MIN
+        if now - p["ts"] > ttl * 60: continue
+        hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
+        if kind == "rocket":
+            rocket = {"time": hhmm, "age": round((now - p["ts"]) / 60), "text": p["text"]}
+        elif kind == "rocket_clear":
+            rocket = None
+        elif kind == "clear":
             rest = extract_places(p["text"])
             if not rest or re.search(r"ранее|тревог|объявлен", p["text"], re.I):
                 active, unknown = [], []
@@ -99,19 +142,20 @@ def build(posts, now=None, geo=geocode):
         elif kind == "alert":
             for place in extract_places(p["text"]):
                 pos = geo(place)
-                item = {"place": place, "time": datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M"), "text": p["text"]}
+                item = {"place": place, "time": hhmm, "text": p["text"]}
                 if pos: active.append({**item, **pos, "age": round((now - p["ts"]) / 60)})
                 else: unknown.append(item)
-    return {"markers": active, "unknown": unknown, "updated": datetime.now(MSK).strftime("%H:%M:%S")}
+    if rocket: rocket["zones"] = zones()
+    return {"markers": active, "unknown": unknown, "rocket": rocket, "updated": datetime.now(MSK).strftime("%H:%M:%S")}
 
 @app.route("/api/markers")
 def markers():
     with lock:
         if time.time() - state["last_fetch"] > 20:
-            try: state["posts"] = fetch_posts()
+            try: refresh_posts()
             except Exception as e: print("fetch error:", e)
             state["last_fetch"] = time.time()
-        return jsonify(build(state["posts"]))
+        return jsonify(build(list(state["posts"].values())))
 
 @app.route("/")
 def index(): return send_from_directory("static", "index.html")
