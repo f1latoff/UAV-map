@@ -122,6 +122,28 @@ def shape(r, q):
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
     return {"lat": lat, "lon": lon, "kind": "object", "r_in": 1500, "r_out": 2500}
 
+def normalize(q):
+    """«Губкинского ГО» -> «Губкинский городской округ», чтобы поиск по карте понимал название."""
+    q = re.sub(r"\bго\b", "городской округ", q, flags=re.I)
+    q = re.sub(r"городского округа", "городской округ", q, flags=re.I)
+    q = re.sub(r"муниципального округа", "муниципальный округ", q, flags=re.I)
+    q = re.sub(r"\bрайона\b", "район", q, flags=re.I)
+    return re.sub(r"(\w+(?:ск|цк))ого\b", r"\1ий", q, flags=re.I)
+
+def split_district(q):
+    w = q.split()
+    for i, x in enumerate(w):
+        if 0 < i < len(w) - 1 and re.search(r"(ск|цк)(ий|ая|ое)$", x, re.I) and w[i + 1].lower() in ("городской", "район", "муниципальный", "мо", "мр", "округ"):
+            return " ".join(w[:i]), " ".join(w[i:])
+    return None
+
+def nominatim(query, q_for_shape, limit=5):
+    r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
+        params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": VIEWBOX, "bounded": 1,
+                "polygon_geojson": 1, "polygon_threshold": 0.003 if "район" in q_for_shape.lower() else 0.0005}).json()
+    time.sleep(1.1)
+    return [{**shape(x, q_for_shape), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)} for x in r]
+
 def candidates(q):
     """Список вариантов места (до 5), лучший по важности первым."""
     low = q.lower()
@@ -136,13 +158,18 @@ def candidates(q):
         c = geocache[low]
         return [c] if isinstance(c, dict) else (c or [])
     try:
-        r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
-            params={"q": f"{q}, {REGION}", "format": "json", "limit": 5, "viewbox": VIEWBOX, "bounded": 1,
-                    "polygon_geojson": 1, "polygon_threshold": 0.003 if "район" in q.lower() else 0.0005}).json()
-        time.sleep(1.1)
+        nq = normalize(q)
+        sd = split_district(nq)
+        res = []
+        if sd:   # «Архангельское Губкинского ГО»: сначала ищем само село, из одинаковых берём ближайшее к названному округу
+            res = nominatim(sd[0], sd[0])
+            hint = nominatim(sd[1], sd[1], 1)
+            if res and hint:
+                res = [min(res, key=lambda x: dkm(x, (hint[0]["lat"], hint[0]["lon"])))]
+        if not res:
+            res = nominatim(nq, q)
     except Exception:
         return []
-    res = [{**shape(x, q), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)} for x in r]
     geocache[low] = res
     json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     return res
