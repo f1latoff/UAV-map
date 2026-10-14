@@ -15,15 +15,15 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
-GEO = "geocache2.json"
+GEO = "geocache3.json"
 geocache = {k: v for k, v in (json.load(open("geocache_seed.json")) if os.path.exists("geocache_seed.json") else {}).items() if v}
 if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*")
-NEIGH = r"курск|воронеж|липецк|харьков|област"
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала")
+NEIGH = r"курск|воронеж|липецк|харьков|област|километр"
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
 BEL = re.compile(r"^белгород(а|е|у)?$|белгородск\w* район")
 
@@ -76,7 +76,7 @@ def classify(text):
     low = text.lower()
     if re.search(JUNK, low): return None
     if "ракетн" in low: return "rocket_clear" if "отбой" in low else "rocket"
-    if "отбой" in low: return "clear"
+    if "отбой" in low or re.search(r"небо чисто|можно продолжить|продолжить движение|миновала", low): return "clear"
     if "внимание" in low or re.search(r"дрон|бпла|беспилот|в сторону", low): return "alert"
     return None
 
@@ -114,24 +114,43 @@ def shape(r, q):
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
     return {"lat": lat, "lon": lon, "kind": "object", "r_in": 1500, "r_out": 2500}
 
-def geocode(q):
+def candidates(q):
+    """Список вариантов места (до 5), лучший по важности первым."""
     low = q.lower()
     for k, v in manual.items():   # places.json: [широта, долгота] или [широта, долгота, радиус_в_метрах]
         if k in low:
             rad = v[2] if len(v) > 2 else 1500
-            return {"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": rad + 1000}
-    if low in geocache: return geocache[low]
+            return [{"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
+    if low in geocache:
+        c = geocache[low]
+        return [c] if isinstance(c, dict) else (c or [])
     try:
         r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
-            params={"q": f"{q}, {REGION}", "format": "json", "limit": 1, "viewbox": VIEWBOX, "bounded": 1,
+            params={"q": f"{q}, {REGION}", "format": "json", "limit": 5, "viewbox": VIEWBOX, "bounded": 1,
                     "polygon_geojson": 1, "polygon_threshold": 0.0005}).json()
         time.sleep(1.1)
     except Exception:
-        return None
-    res = shape(r[0], q) if r else None
+        return []
+    res = [{**shape(x, q), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)} for x in r]
     geocache[low] = res
     json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     return res
+
+def dkm(a, b):
+    return math.hypot((a["lat"] - b[0]) * 111, (a["lon"] - b[1]) * 111 * math.cos(math.radians(b[0])))
+
+def resolve(places, cands=candidates):
+    """Выбирает место для каждого названия; одинаковые названия (Алексеевка) уточняем по соседним местам в сообщении."""
+    cl = {pl: cands(pl) for pl in places}
+    pick = {pl: max(c, key=lambda x: x["imp"]) for pl, c in cl.items() if c}
+    for _ in range(2):
+        for pl, c in cl.items():
+            others = [p for k, p in pick.items() if k != pl]
+            if len(c) > 1 and others:
+                cen = (sum(p["lat"] for p in others) / len(others), sum(p["lon"] for p in others) / len(others))
+                if dkm(pick[pl], cen) > 25:   # лучший по важности далеко от остальных: берём ближайший к ним
+                    pick[pl] = min(c, key=lambda x: dkm(x, cen))
+    return pick
 
 def rocket_zones():
     if geocache.get("__rocket__"): return geocache["__rocket__"]
@@ -156,7 +175,7 @@ def rocket_zones():
 
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
-def build(posts, now=None, geo=geocode, zones=rocket_zones):
+def build(posts, now=None, geo=candidates, zones=rocket_zones):
     now = now or time.time()
     drone, unknown, oblast_drone = {}, [], None
     feed = []
@@ -178,10 +197,11 @@ def build(posts, now=None, geo=geocode, zones=rocket_zones):
                 if "област" in low: rk["oblast"] = True
                 else:
                     rk["city"] = True; fpos = CENTER   # без места: Белгород и Белгородский район
+            pk = resolve([x for x in places if not BEL.search(x.lower())], geo)
             for pl in places:
                 if BEL.search(pl.lower()): rk["city"] = True; fpos = fpos or CENTER
                 else:
-                    pos = geo(pl)
+                    pos = pk.get(pl)
                     if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
         elif kind == "clear":
             if not places or re.search(r"ранее|тревог|объявлен|вся|всей|всех", low):
@@ -191,8 +211,9 @@ def build(posts, now=None, geo=geocode, zones=rocket_zones):
                 drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
         elif kind == "alert":
             if re.search(r"всей территории|по всей области", low): oblast_drone = {"time": hhmm}
+            pk = resolve(places, geo)
             for pl in places:
-                pos = geo(pl)
+                pos = pk.get(pl)
                 if not pos:
                     unknown.append({"place": pl, "time": hhmm}); continue
                 fpos = fpos or pos
