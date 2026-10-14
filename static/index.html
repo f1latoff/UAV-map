@@ -110,7 +110,7 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();
   const ms=d.markers.filter(m=>!onlyFresh||m.age<15);
   ms.forEach(m=>{const fr=m.age<15,col=fr?'#e00000':'#ff8800',fo=fr?.45:.3;
     const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
-    if(m.kind==='district'){L.circle([m.lat,m.lon],{radius:m.r_in,color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
+    if(m.kind==='district'){shape(m,{color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
     L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
     shape(m,{color:col,weight:m.n>1?4:2,fillOpacity:fo}).bindPopup(pop).addTo(layer)});
   if(first&&layer.getLayers().length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
