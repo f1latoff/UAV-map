@@ -3,9 +3,9 @@
 <title>Карта оповещений БПЛА</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>body{margin:0;font-family:sans-serif}
-#bar{height:84px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}
-#wrap{position:relative;height:calc(100vh - 84px)}#map{height:100%}
+<style>body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{flex:none;height:84px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}
+#wrap{position:relative;flex:1;min-height:0}#map{height:100%}
 #tint{position:absolute;inset:0;pointer-events:none;z-index:500;display:none}
 .lg,.tb{background:#fff;border-radius:6px;box-shadow:0 1px 4px #0006;font-size:12px;line-height:1.6}.lg{max-width:240px}
 .lh{padding:6px 10px;font-weight:bold;cursor:pointer}.lb{padding:0 10px 8px;max-height:45vh;overflow:auto}
@@ -13,6 +13,7 @@
 #me{padding:4px 6px;display:none}
 #panel{position:absolute;z-index:600;background:#fff;display:none;flex-direction:column;box-shadow:0 0 8px #0007;
   left:0;right:0;bottom:0;max-height:55%}
+@media(max-width:699px){.tb button{padding:11px 8px;font-size:15px}.lh{padding:11px 12px;font-size:14px}.lb{font-size:13px}.leaflet-bottom{margin-bottom:env(safe-area-inset-bottom)}}
 @media(min-width:700px){#panel{left:auto;width:380px;top:0;max-height:none}}
 #ph{padding:8px;border-bottom:1px solid #ddd;font-size:13px}#ph input[type=text]{width:100%;box-sizing:border-box;padding:6px;margin-bottom:4px}
 #list{overflow:auto;padding:4px 8px;font-size:13px}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}</style></head>
@@ -30,7 +31,7 @@ const layer=L.layerGroup().addTo(map);
 let first=true,D=null,userPos=null,userMarker=null,onlyFresh=false,query='';
 const $=id=>document.getElementById(id),panel=$('panel');
 // легенда (сворачивается)
-const lg=L.control({position:'bottomleft'});
+const lg=L.control({position:innerWidth<700?'topleft':'bottomleft'});
 lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
   c.innerHTML='<div class="lh">ⓘ Обозначения</div><div class="lb">'+
   '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br><span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
