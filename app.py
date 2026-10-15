@@ -149,6 +149,24 @@ def nominatim(query, q_for_shape, limit=10):
     time.sleep(1.1)
     return [{**shape(x, q_for_shape), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)} for x in r]
 
+CITY = (50.5958, 36.5873)   # центр Белгорода (Соборная площадь)
+
+def city_part(q):
+    """«центр города», «север города», «в юго-западной части Белгорода»: часть Белгорода как круг вокруг точки, смещённой от центра."""
+    low = q.lower().replace("ё", "е")
+    if not re.search(r"(?:города|белгород\w*)", low) or re.search(r"белгородск\w*\s+(?:район|област)", low): return None
+    if re.search(r"центр\w*", low):
+        lat, lon, rad = CITY[0], CITY[1], 2000
+    else:
+        ns = 1 if "север" in low else -1 if re.search(r"\bюг|южн|юго", low) else 0
+        ew = 1 if re.search(r"восток|восточ", low) else -1 if re.search(r"запад", low) else 0
+        if not ns and not ew: return None
+        k = 0.707 if ns and ew else 1            # по диагонали смещение по каждой оси меньше
+        lat = CITY[0] + ns * k * 3.5 / 111
+        lon = CITY[1] + ew * k * 3.5 / (111 * math.cos(math.radians(CITY[0])))
+        rad = 2500
+    return {"lat": lat, "lon": lon, "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}
+
 def candidates(q):
     """Список вариантов места (до 5), лучший по важности первым."""
     low = q.lower()
@@ -156,6 +174,8 @@ def candidates(q):
         if k in low:
             rad = v[2] if len(v) > 2 else 1500
             return [{"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
+    cp = city_part(q)
+    if cp: return [cp]
     for rx, la, lo, rad in ALIASES:
         if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
     if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
@@ -264,18 +284,35 @@ def fix_names(t):
     t = re.sub(r"\b[Дд]убовск\w*\s+пол\w*", "Парк Дуба", t)   # «Дубовское поле» (в любом падеже) = Парк Дуба
     return re.sub(r"\b([Сс]евр)я(ков\w*)", r"\1ю\2", t)    # «Севрякова» -> «Севрюкова»
 
-RT_STOP = r"всем|никому|остановить|остановите|стоп|можно|не пользоваться|находим|находите|займите|над|подлет\w*|летит|уничтожен|опасн\w*|движение|покиньте|покидайте|идет|идёт|массов\w*|пролет\w*|пролёт\w*|уходите|укрыти\w*"
-ROUTE = re.compile(r"\bот\s+(?P<a>[^,.!:;\n]+?)\s+(?:до|в\s+сторону|к)\s+(?P<b>[^.!:;\n]+?)(?=\s*,?\s*(?:также|" + RT_STOP + r")\b|[.!:;\n]|$)", re.I)
+RT_STOP = r"всем|никому|остановить|остановите|стоп|можно|не пользоваться|находим\w*|находит\w*|займите|над|подлет\w*|летит|уничтожен\w*|опасн\w*|движени\w*|покиньте|покидайте|идет|идёт|массов\w*|пролет\w*|пролёт\w*|уходите|укрыти\w*|выйдите|прошу|внимание|ударн\w*|бпла|дрон\w*|угроз\w*"
+_END = r"(?=\s*,?\s*(?:также|" + RT_STOP + r")\b|[.!:;\n]|$)"
+ROUTE = re.compile(r"\bот\s+(?P<a>[^,.!:;\n]+?)\s+(?:до|в\s+сторону|к)\s+(?P<b>[^.!:;\n]+?)" + _END, re.I)
+ROUTE2 = re.compile(r"\b(?:автодорог\w*|трасс\w*|дорог\w*|участок)\s+(?P<n>[^.!:;\n]+?)" + _END, re.I)   # «трасса Никольское Таврово» без «от … до»
+CUT = lambda x: x.strip(" \"'«»-—–")
+
+def split_route_names(n):
+    parts = [CUT(x) for x in re.split(r"\s*[—–-]\s*|,|\bи\b|\bдо\b", n) if CUT(x)]
+    return parts if len(parts) >= 2 and all(len(x) >= 4 and not re.search(r"\d", x) for x in parts) else None
 
 def extract_routes(text):
-    """«от X до Y, Z» -> ([(X, [Y, Z])], текст без этой фразы)."""
-    routes = []
+    """«от X до Y, Z» и «трасса X Y» -> (участки [(X, [Y, Z])], текст без этих фраз, фразы из 2-4 слов без разделителей)."""
+    routes, loose = [], []
     def take(m):
-        cut = lambda x: x.strip(" \"'«»-")
-        bs = [cut(x) for x in re.split(r",|\bи\b", m.group("b")) if cut(x)]
-        if cut(m.group("a")) and bs: routes.append((cut(m.group("a")), bs))
+        bs = [CUT(x) for x in re.split(r",|\bи\b", m.group("b")) if CUT(x)]
+        if CUT(m.group("a")) and bs: routes.append((CUT(m.group("a")), bs))
         return " "
-    return routes, ROUTE.sub(take, text)
+    rest = ROUTE.sub(take, text)
+    def take2(m):
+        n = m.group("n")
+        if re.search(r"[—–-]|,|\bи\b|\bдо\b", n):
+            parts = split_route_names(n)
+            if parts: routes.append((parts[0], parts[1:4])); return " "
+        else:
+            w = n.split()
+            if 2 <= len(w) <= 4 and all(len(x) >= 4 and not re.search(r"\d", x) for x in w):
+                loose.append(" ".join(w)); return " "
+        return m.group(0)
+    return routes, ROUTE2.sub(take2, rest), loose
 
 SUF = [("ского", "ское"), ("ого", "ое"), ("ой", "а"), ("ова", "ово"), ("ева", "ево"), ("ина", "ино"), ("ки", "ка"), ("ни", "нь"), ("ги", "га"), ("ы", "а"), ("а", "")]
 
@@ -313,7 +350,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60: continue
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
-        routes, rest = extract_routes(txt) if kind in ("alert", "clear") else ([], txt)
+        routes, rest, loose = extract_routes(txt) if kind in ("alert", "clear") else ([], txt, [])
         places = extract_places(rest)
         fpos = None
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
@@ -332,7 +369,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                     pos = pk.get(pl)
                     if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
         elif kind == "clear":
-            cl = places + [e for a, bs in routes for e in [a] + bs]
+            cl = places + [e for a, bs in routes for e in [a] + bs] + [w for phr in loose for w in phr.split()]
             if not cl or re.search(r"ранее|тревог|объявлен|вся|всей|всех", low):
                 drone, unknown, oblast_drone = {}, [], None
             else:
@@ -342,6 +379,9 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
             if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
                 oblast_drone = {"time": hhmm}   # тревога по всей области: плашка и оранжевая рамка, без заливки
             rc = lambda pl: merge_forms(pl, geo)
+            for phr in loose:   # «трасса Никольское Таврово»: два названия подряд = участок; а «Новая Деревня» = одно название
+                if merge_forms(phr, geo): places.append(phr)
+                else: routes.append((phr.split()[0], phr.split()[1:4]))
             for a, bs in routes:   # «от X до Y»: полоса вдоль трассы (прямая линия между селами, через все названные)
                 names = [a] + bs; label = " — ".join(names)
                 pk0 = resolve(names, rc)
