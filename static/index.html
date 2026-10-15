@@ -57,6 +57,9 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 .wx{background:#fff;border-radius:16px;padding:5px 11px;font-size:14px;line-height:1.3;box-shadow:0 1px 4px #0006;white-space:nowrap;pointer-events:none}
 .dark .wx{background:#1f2430;color:#e8e8e8}
 .leaflet-right .wx{margin-right:14px;margin-bottom:6px}
+.lt{font-weight:bold;margin:7px 0 2px}.lt:first-child{margin-top:0}.li{display:flex;align-items:center;gap:7px;margin:2px 0}.li.dim{opacity:.7}
+.sw{display:inline-block;flex:none;width:14px;height:14px;border-radius:3px}.sw.ci{border-radius:50%;border:2px solid #a020f0;background:transparent}
+.sw.sq{border:2px solid #e00000;background:transparent}.sw.bar{height:6px;margin:4px 0;background:#e00000;border-radius:3px}.sw.pale{background:rgba(224,0,0,.18);border:1px solid #e00000}
 </style></head>
 <body><div id="bar">Загрузка…</div>
 <div id="wrap"><div id="map"></div><div id="tint"></div><div id="pwa"></div>
@@ -90,7 +93,7 @@ map.attributionControl.setPrefix('Leaflet');   // подпись библиот�
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
 // слои зон: заливка рисуется сплошным цветом, а прозрачность 40% применяется ко всему слою сразу, поэтому где зоны пересекаются, цвет не темнеет
 const mkPane=(n,z,o)=>{const p=map.createPane(n);p.style.zIndex=z;p.style.opacity=o};
-mkPane('zMargin',402,.12);mkPane('zFill',405,.4);mkPane('zLine',408,1);
+mkPane('zMargin',402,.12);mkPane('zFillOld',403,.25);mkPane('zFill',404,.4);mkPane('zPointOld',405,.25);mkPane('zPoint',406,.4);mkPane('zLine',408,1);
 const oblastLayer=L.layerGroup().addTo(map);   // заливка всей области лежит под зонами
 const layer=L.layerGroup().addTo(map);
 let routeLayers=[];
@@ -120,11 +123,21 @@ async function browserWeather(){
 const lg=L.control({position:innerWidth<700?'topleft':'bottomleft'});
 lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
   c.innerHTML='<div class="lh">ⓘ Обозначения</div><div class="lb">'+
-  '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br><span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
-  '<span style="color:#999">◌</span> Пунктир: возможная зона риска (+1 км)<br>▭ Контур: село или посёлок<br>○ Круг 1,5 км: объект или улица<br>'+
-  '<span style="color:#e99">●</span> Бледная заливка: район<br><b style="color:#e00000">━</b> Полоса: участок трассы («от … до …»)<br><span style="color:#e00000">▨</span> Бледная заливка всей области: красная ракетная опасность, оранжевая с пунктиром тревога БПЛА<br><b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
-  '<span style="color:#8b0000">■</span> Тёмно-красный: ракетная опасность<br><span style="color:#c00">▢</span> Красная рамка карты: ракетная опасность по всей области<br>'+
-  '<span style="color:#f80">▢</span> Оранжевая рамка: тревога БПЛА по всей области<br><span style="color:#1a73e8">●</span> Синяя точка: вы</div>';
+  '<div class="lt">Цвет</div>'+
+  '<div class="li"><i class="sw" style="background:#e00000"></i>Тревога: БПЛА зафиксирован</div>'+
+  '<div class="li"><i class="sw" style="background:#ffc400"></i>Опасность: возможен БПЛА</div>'+
+  '<div class="li"><i class="sw" style="background:#a020f0"></i>Фиолетовый: то же для точки (центр, вокзал, объект)</div>'+
+  '<div class="li"><i class="sw" style="background:#b00000"></i>Ракетная опасность</div>'+
+  '<div class="li dim">Бледнее: прошло больше 15 минут</div>'+
+  '<div class="lt">Форма</div>'+
+  '<div class="li"><i class="sw sq"></i>Контур: город, село</div>'+
+  '<div class="li"><i class="sw bar"></i>Полоса: участок трассы</div>'+
+  '<div class="li"><i class="sw ci"></i>Круг: точка или объект</div>'+
+  '<div class="li"><i class="sw pale"></i>Бледная заливка: район, округ</div>'+
+  '<div class="lt">Ещё</div>'+
+  '<div class="li">Рамка вокруг карты: тревога на всю область</div>'+
+  '<div class="li">Толстая обводка: подтверждено несколькими каналами</div>'+
+  '<div class="li"><i class="sw ci" style="background:#1a73e8;border:0"></i>Синяя точка: вы</div></div>';
   L.DomEvent.disableClickPropagation(c);const b=c.querySelector('.lb');b.style.display=innerWidth<700?'none':'block';
   c.querySelector('.lh').onclick=()=>{b.style.display=b.style.display==='none'?'block':'none'};return c};lg.addTo(map);
 // кнопки «Где я» и «Лента»
@@ -148,17 +161,18 @@ function dist(s,lat,lon){if(s.pts){let m=1e12;for(let i=0;i<s.pts.length-1;i++)m
   return Math.max(0,hav(lat,lon,s.lat,s.lon)-s.r_in)}
 const km=m=>(m/1000).toFixed(1).replace('.',',');
 function renderMe(){const el=$('me');if(!userPos||!D){el.style.display='none';return}
-  const[lat,lon]=userPos,R=D.rocket,o=[];
+  const[lat,lon]=userPos,R=D.rocket,o=[],inObl=D.oblast_poly?inPoly(lon,lat,D.oblast_poly):true;
   if(R){let dr=1e12;if(R.city)(R.zones?R.zones.map(g=>({poly:g})):[{lat:50.5997,lon:36.5983,r_in:25000}]).forEach(s=>dr=Math.min(dr,dist(s,lat,lon)));
     R.places.forEach(s=>dr=Math.min(dr,dist(s,lat,lon)));
     if(dr===0)o.push('<b style="color:#b00000">⚠ Вы в зоне ракетной опасности</b>');
-    else if(R.oblast)o.push('Ракетная опасность объявлена по всей области');
+    else if(R.oblast)o.push(inObl?'<b style="color:#b00000">⚠ Вы в зоне ракетной опасности (вся область)</b>':'Ракетная опасность объявлена по всей области, вы за её границами');
     else if(dr<1e12)o.push(`Ракетная опасность: до зоны ~${km(dr)} км`)}
   let best=null;D.markers.forEach(m=>{const d=dist(m,lat,lon);if(!best||d<best.d)best={d,m}});
   if(best)o.push(best.d===0?`<b style="color:#c00000">⚠ Вы в зоне БПЛА: ${esc(best.m.place)}</b>`:`Ближайшая зона БПЛА: ${esc(best.m.place)}, ~${km(best.d)} км`);
-  else o.push('Активных зон БПЛА нет');
-  if(D.oblast_drone)o.push('Тревога по БПЛА объявлена по всей области');
+  else o.push(D.oblast_drone?'Отдельных зон рядом нет':'Активных зон БПЛА нет');
+  if(D.oblast_drone){const dn=D.oblast_drone.level==='danger';o.push(inObl?'<b style="color:'+(dn?'#b58900':'#d06000')+'">⚠ Вы в зоне '+(dn?'опасности':'тревоги')+' по БПЛА (вся область)</b>':(dn?'Опасность':'Тревога')+' по БПЛА объявлена по всей области, вы за её границами')}
   o.push('<span style="color:#777">Ваше положение не отправляется на сервер</span>');
+  o.sort((a,b)=>(b.startsWith('<b')?1:0)-(a.startsWith('<b')?1:0));   // предупреждения наверх
   el.innerHTML=o.join('<br>');el.style.display='block'}
 $('bme').onclick=()=>{
   if(userPos){userPos=null;if(userMarker)map.removeLayer(userMarker);userMarker=null;renderMe();$('bme').textContent='📍 Где я';return}
@@ -170,14 +184,14 @@ $('bme').onclick=()=>{
 // лента
 const feedItems=()=>{const nq=norm(query);return(D?D.feed:[]).filter(f=>(!onlyFresh||f.age<15)&&(!nq||norm(f.text).includes(nq)))};
 function renderFeed(){const it=feedItems(),l=$('list');
-  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':'🟠'}<br>${esc(f.text)}</div>`).join('')||`<div style="padding:14px 4px;color:#888">${query||onlyFresh?'Ничего не найдено.':'Сейчас нет сообщений об оповещениях. Здесь показываются свежие сообщения каналов.'}</div>`;
+  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':f.level==='danger'?'🟨':'🟥'}<br>${esc(f.text)}</div>`).join('')||`<div style="padding:14px 4px;color:#888">${query||onlyFresh?'Ничего не найдено.':'Сейчас нет сообщений об оповещениях. Здесь показываются свежие сообщения каналов.'}</div>`;
   l.querySelectorAll('.fi').forEach(e=>e.onclick=()=>{const f=it[+e.dataset.i];if(f.lat!=null){map.flyTo([f.lat,f.lon],12);if(innerWidth<700)panel.style.display='none'}})}
 // карта
 function updRoutes(){const k=156543.03392*Math.cos(50.6*Math.PI/180)/Math.pow(2,map.getZoom());routeLayers.forEach(l=>l.setStyle({weight:Math.max(5,l._m/k)}))}
 map.on('zoomend',updRoutes);
 function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLayers();routeLayers=[];
   if(d.oblast_poly){   // лёгкая заливка по границе области: БПЛА оранжевая с пунктиром, ракетная красная со сплошным контуром
-    if(d.oblast_drone)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#ff8800',weight:3,dashArray:'8 6',fillColor:'#ff8800',fillOpacity:.14}}).addTo(oblastLayer);
+    if(d.oblast_drone){const oc=d.oblast_drone.level==='danger'?'#ffc400':'#ff8800';L.geoJSON(d.oblast_poly,{interactive:false,style:{color:oc,weight:3,dashArray:'8 6',fillColor:oc,fillOpacity:.14}}).addTo(oblastLayer)}
     if(d.rocket&&d.rocket.oblast)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#b00000',weight:3,fillColor:'#d00000',fillOpacity:.18}}).addTo(oblastLayer);}
   const rs={stroke:false,fillColor:'#b00000',fillOpacity:1,pane:'zFill'};
   const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st,pane:st.pane,interactive:st.interactive!==false}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
@@ -186,26 +200,27 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
     if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs,pane:'zFill'})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
     R.places.forEach(m=>shape(m,rs).bindPopup(`<b>Ракетная опасность: ${esc(m.place)}</b><br>${esc(R.time)}`).addTo(layer))}
   const ms=d.markers.filter(m=>!onlyFresh||m.age<15);
-  ms.forEach(m=>{const fr=m.age<15,col=fr?'#e00000':'#ff8800';
-    const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
+  ms.forEach(m=>{const fr=m.age<15,PAL={a:{alarm:'#e00000',danger:'#ffc400'},p:{alarm:'#a020f0',danger:'#c9a0ff'}},
+      col=PAL[m.pt?'p':'a'][m.level||'alarm'],fp=fr?(m.pt?'zPoint':'zFill'):(m.pt?'zPointOld':'zFillOld'),lv=m.level==='danger'?'опасность':'тревога';
+    const pop=`<b>${esc(m.place)}</b> (${lv})<br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
     if(m.kind==='route'){const o={lineCap:'round',lineJoin:'round',opacity:1};
       const a=L.polyline(m.pts,{...o,color:col,weight:10,pane:'zMargin',interactive:false}).addTo(layer);a._m=m.w_out;
-      const b=L.polyline(m.pts,{...o,color:col,weight:8,pane:'zFill'}).bindPopup(pop).addTo(layer);b._m=m.w_in;
+      const b=L.polyline(m.pts,{...o,color:col,weight:8,pane:fp}).bindPopup(pop).addTo(layer);b._m=m.w_in;
       routeLayers.push(a,b);return}
     if(m.kind==='district'){   // район: бледная заливка и тонкий контур
       shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin'}).bindPopup(pop).addTo(layer);
       shape(m,{color:col,weight:1,fill:false,pane:'zLine',interactive:false}).addTo(layer);return}
-    L.circle([m.lat,m.lon],{radius:m.r_out,stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin',interactive:false}).addTo(layer);   // возможная зона риска (+1 км)
-    L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fill:false,opacity:.7,pane:'zLine',interactive:false}).addTo(layer);
-    shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:'zFill'}).bindPopup(pop).addTo(layer);
+    if(!(m.poly&&m.r_out>6000))L.circle([m.lat,m.lon],{radius:m.r_out,stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin',interactive:false}).addTo(layer);   // возможная зона риска (+1 км)
+    if(!(m.poly&&m.r_out>6000))L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fill:false,opacity:.7,pane:'zLine',interactive:false}).addTo(layer);
+    shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:fp}).bindPopup(pop).addTo(layer);
     shape(m,{color:col,weight:m.n>1?4:2,fill:false,pane:'zLine',interactive:false}).addTo(layer)});
   if(first&&layer.getLayers().length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
   const t=$('tint'),ro=R&&R.oblast;t.style.display=(ro||d.oblast_drone)?'block':'none';
-  t.style.boxShadow=ro?'inset 0 0 0 5px rgba(200,0,0,.75)':'inset 0 0 0 4px rgba(255,136,0,.8)';
+  t.style.boxShadow=ro?'inset 0 0 0 5px rgba(200,0,0,.75)':('inset 0 0 0 4px '+(d.oblast_drone&&d.oblast_drone.level==='danger'?'rgba(255,196,0,.85)':'rgba(255,136,0,.8)'));
   const bad=(d.status||[]).filter(s=>s.err||s.age===null||s.age>3);
   let top=bad.length?`<b style="color:#ffd54a">⚠ Нет свежих данных: ${bad.map(s=>esc(s.ch)+(s.age===null?'':' ('+s.age+' мин назад)')).join(', ')}. Карта может быть неполной.</b><br>`:'';
   if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${esc(R.time)} (МСК)${ro?': вся Белгородская область':''}.</b> `;
-  if(d.oblast_drone)top+=`<b style="color:#ffaa44">Тревога по БПЛА на всей территории области (${esc(d.oblast_drone.time)}).</b> `;
+  if(d.oblast_drone)top+=`<b style="color:#ffaa44">${d.oblast_drone.level==='danger'?'Опасность':'Тревога'} по БПЛА на всей территории области (${esc(d.oblast_drone.time)}).</b> `;
   $('bar').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}. `+
     (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
     '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
