@@ -88,6 +88,9 @@ const norm=s=>String(s).toLowerCase().replace(/ё/g,'е');
 const map=L.map('map').setView([50.6,36.6],9);
 map.attributionControl.setPrefix('Leaflet');   // подпись библиотеки простым текстом, без ссылки
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+// слои зон: заливка рисуется сплошным цветом, а прозрачность 40% применяется ко всему слою сразу, поэтому где зоны пересекаются, цвет не темнеет
+const mkPane=(n,z,o)=>{const p=map.createPane(n);p.style.zIndex=z;p.style.opacity=o};
+mkPane('zMargin',402,.12);mkPane('zFill',405,.4);mkPane('zLine',408,1);
 const oblastLayer=L.layerGroup().addTo(map);   // заливка всей области лежит под зонами
 const layer=L.layerGroup().addTo(map);
 let routeLayers=[];
@@ -161,7 +164,7 @@ $('bme').onclick=()=>{
   if(userPos){userPos=null;if(userMarker)map.removeLayer(userMarker);userMarker=null;renderMe();$('bme').textContent='📍 Где я';return}
   if(!navigator.geolocation){alert('Браузер не поддерживает геолокацию');return}
   navigator.geolocation.getCurrentPosition(p=>{userPos=[p.coords.latitude,p.coords.longitude];
-    userMarker=L.circleMarker(userPos,{radius:7,color:'#fff',weight:2,fillColor:'#1a73e8',fillOpacity:1}).addTo(map);
+    userMarker=L.circleMarker(userPos,{radius:7,color:'#fff',weight:2,fillColor:'#1a73e8',fillOpacity:1,pane:'zLine'}).addTo(map);
     map.setView(userPos,12);$('bme').textContent='✕ Скрыть моё место';renderMe()},
     ()=>alert('Не удалось определить положение. Разрешите доступ к геолокации для этого сайта в браузере.'),{timeout:10000,maximumAge:30000})};
 // лента
@@ -176,22 +179,26 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
   if(d.oblast_poly){   // лёгкая заливка по границе области: БПЛА оранжевая с пунктиром, ракетная красная со сплошным контуром
     if(d.oblast_drone)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#ff8800',weight:3,dashArray:'8 6',fillColor:'#ff8800',fillOpacity:.14}}).addTo(oblastLayer);
     if(d.rocket&&d.rocket.oblast)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#b00000',weight:3,fillColor:'#d00000',fillOpacity:.18}}).addTo(oblastLayer);}
-  const rs={stroke:false,fillColor:'#b00000',fillOpacity:.45};
-  const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
+  const rs={stroke:false,fillColor:'#b00000',fillOpacity:1,pane:'zFill'};
+  const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st,pane:st.pane,interactive:st.interactive!==false}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
   const R=d.rocket;
   if(R){const pop=`<b>Ракетная опасность</b><br>${esc(R.time)}<br>${esc(R.text)}`;
-    if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
+    if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs,pane:'zFill'})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
     R.places.forEach(m=>shape(m,rs).bindPopup(`<b>Ракетная опасность: ${esc(m.place)}</b><br>${esc(R.time)}`).addTo(layer))}
   const ms=d.markers.filter(m=>!onlyFresh||m.age<15);
-  ms.forEach(m=>{const fr=m.age<15,col=fr?'#e00000':'#ff8800',fo=fr?.45:.3;
+  ms.forEach(m=>{const fr=m.age<15,col=fr?'#e00000':'#ff8800';
     const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
-    if(m.kind==='route'){const o={lineCap:'round',lineJoin:'round'};
-      const a=L.polyline(m.pts,{...o,color:col,weight:10,opacity:.12}).addTo(layer);a._m=m.w_out;
-      const b=L.polyline(m.pts,{...o,color:col,weight:8,opacity:fr?.5:.35}).bindPopup(pop).addTo(layer);b._m=m.w_in;
+    if(m.kind==='route'){const o={lineCap:'round',lineJoin:'round',opacity:1};
+      const a=L.polyline(m.pts,{...o,color:col,weight:10,pane:'zMargin',interactive:false}).addTo(layer);a._m=m.w_out;
+      const b=L.polyline(m.pts,{...o,color:col,weight:8,pane:'zFill'}).bindPopup(pop).addTo(layer);b._m=m.w_in;
       routeLayers.push(a,b);return}
-    if(m.kind==='district'){shape(m,{color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
-    L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
-    shape(m,{color:col,weight:m.n>1?4:2,fillOpacity:fo}).bindPopup(pop).addTo(layer)});
+    if(m.kind==='district'){   // район: бледная заливка и тонкий контур
+      shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin'}).bindPopup(pop).addTo(layer);
+      shape(m,{color:col,weight:1,fill:false,pane:'zLine',interactive:false}).addTo(layer);return}
+    L.circle([m.lat,m.lon],{radius:m.r_out,stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin',interactive:false}).addTo(layer);   // возможная зона риска (+1 км)
+    L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fill:false,opacity:.7,pane:'zLine',interactive:false}).addTo(layer);
+    shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:'zFill'}).bindPopup(pop).addTo(layer);
+    shape(m,{color:col,weight:m.n>1?4:2,fill:false,pane:'zLine',interactive:false}).addTo(layer)});
   if(first&&layer.getLayers().length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
   const t=$('tint'),ro=R&&R.oblast;t.style.display=(ro||d.oblast_drone)?'block':'none';
   t.style.boxShadow=ro?'inset 0 0 0 5px rgba(200,0,0,.75)':'inset 0 0 0 4px rgba(255,136,0,.8)';
