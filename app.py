@@ -2,7 +2,7 @@ import os, re, json, time, math, threading
 from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "BelgorodDRONE,lpr1_Belgorod_alarm,LiveOnlain").split(",") if c.strip()]
 TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько минут зона БПЛА гаснет сама
@@ -22,12 +22,13 @@ manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*")
 NEIGH = r"курск|воронеж|липецк|харьков|област"
-KM = re.compile(r"\d+\W*(?:й|ый|ой)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
+KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
-    (re.compile(r"(?<!\d)26\W*(?:й|ый|ой)?\W*(?:километр|км)", re.I), 50.542511, 36.479119, 2000),   # М-2, подъезд к Белгороду, 26-й км
+    (re.compile(r"(?<!\d)26\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I), 50.542511, 36.479119, 2000),   # М-2, подъезд к Белгороду, 26-й км
     (re.compile(r"\bбабочк\w*", re.I), 50.568621, 36.460408, 1000),                                    # развязка «Бабочка» (М-2, 674-й км)
+    (re.compile(r"^\W*развязк\w*\W*$", re.I), 50.521067, 36.704759, 1000),                              # просто «развязка» (маршрут «от развязки до …», у Разумного)
     (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 1000),                           # кольцо «Я люблю Белгород»
 ]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
@@ -84,14 +85,14 @@ def classify(text):
     calm = re.search(r"не наблюда|активности нет", low)   # «На данный момент активность не наблюдаем» = спокойно
     if "ракетн" in low: return "rocket_clear" if ("отбой" in low or calm) else "rocket"
     if "отбой" in low or calm or re.search(r"небо чисто|можно продолжить|продолжить движение|миновала", low): return "clear"
-    if "внимание" in low or re.search(r"дрон|бпла|беспилот|в сторону", low): return "alert"
+    if "внимание" in low or re.search(r"дрон|бпла|беспилот|в сторону|стоп движ|остановить движение|остановите движение", low): return "alert"
     return None
 
 def extract_places(text):
     t = re.sub(r"^\s*(внимание|отбой)[,!.:\s]*", "", text, flags=re.I)
     head = re.split(STOP, t, maxsplit=1, flags=re.I)[0]
     out = []
-    for p in re.split(r"[\n,;:.!]|\bтакже\b|\bи\b", head):
+    for p in re.split(r"[\n,;:.!]|\bтакже\b|\bи\b", head, flags=re.I):
         p = re.sub(r"\s+", " ", re.sub(NOISE, " ", p, flags=re.I)).strip(" \"'«»-")
         if len(p) > 2 and not re.search(NEIGH, p, re.I):
             if "районы" in text.lower() and "район" not in p.lower() and re.search(r"(ий|ый|ой)$", p):
@@ -212,6 +213,40 @@ def rocket_zones():
         return polys
     return None   # тогда на сайте рисуется запасной круг 25 км вокруг Белгорода
 
+def fix_names(t):
+    t = re.sub(r"\b([Уу])син(к\w*)", r"\1стин\2", t)        # опечатка «Усинки» -> «Устинки»
+    return re.sub(r"\b([Сс]евр)я(ков\w*)", r"\1ю\2", t)    # «Севрякова» -> «Севрюкова»
+
+RT_STOP = r"всем|никому|остановить|остановите|стоп|можно|не пользоваться|находим|находите|займите|над|подлет\w*|летит|уничтожен|опасн\w*|движение"
+ROUTE = re.compile(r"\bот\s+(?P<a>[^,.!:;\n]+?)\s+(?:до|в\s+сторону|к)\s+(?P<b>[^.!:;\n]+?)(?=\s*,?\s*(?:также|" + RT_STOP + r")\b|[.!:;\n]|$)", re.I)
+
+def extract_routes(text):
+    """«от X до Y, Z» -> ([(X, [Y, Z])], текст без этой фразы)."""
+    routes = []
+    def take(m):
+        cut = lambda x: x.strip(" \"'«»-")
+        bs = [cut(x) for x in re.split(r",|\bи\b", m.group("b")) if cut(x)]
+        if cut(m.group("a")) and bs: routes.append((cut(m.group("a")), bs))
+        return " "
+    return routes, ROUTE.sub(take, text)
+
+SUF = [("ского", "ское"), ("ого", "ое"), ("ой", "а"), ("ова", "ово"), ("ева", "ево"), ("ина", "ино"), ("ки", "ка"), ("ни", "нь"), ("ги", "га"), ("ы", "а")]
+
+def name_forms(ph):
+    """«Никольского» -> «Никольское», «Масловой Пристани» -> «Маслова Пристань»: сначала как написано, потом в начальной форме."""
+    ph = ph.strip(); out = [ph]; full = []
+    for w in ph.split():
+        for a, b in SUF:
+            if w.lower().endswith(a) and len(w) > len(a) + 2:
+                full.append(w[:-len(a)] + b); break
+        else: full.append(w)
+    f = " ".join(full)
+    if f != ph: out.append(f)
+    return out
+
+def route_len(pts):
+    return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
+
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
 def build(posts, now=None, geo=candidates, zones=rocket_zones):
@@ -220,13 +255,19 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones):
     feed = []
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
+    def put(pos, name, p, hhmm):
+        k = zkey(pos); z = drone.get(k)
+        if z: z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
+        else: drone[k] = {**pos, "place": name, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm}
     for p in sorted(posts, key=lambda p: p["ts"]):
-        kind = classify(p["text"])
+        txt = fix_names(p["text"])
+        kind = classify(txt)
         if not kind: continue
         if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60: continue
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
-        places = extract_places(p["text"])
+        routes, rest = extract_routes(txt) if kind in ("alert", "clear") else ([], txt)
+        places = extract_places(rest)
         fpos = None
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
             rk = fresh_rk()
@@ -244,14 +285,32 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones):
                     pos = pk.get(pl)
                     if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
         elif kind == "clear":
-            if not places or re.search(r"ранее|тревог|объявлен|вся|всей|всех", low):
+            cl = places + [e for a, bs in routes for e in [a] + bs]
+            if not cl or re.search(r"ранее|тревог|объявлен|вся|всей|всех", low):
                 drone, unknown, oblast_drone = {}, [], None
             else:
-                ss = set().union(*[stems(x) for x in places])
+                ss = set().union(*[stems(x) for x in cl])
                 drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
         elif kind == "alert":
             if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
                 oblast_drone = {"time": hhmm}   # тревога по всей области: плашка и оранжевая рамка, без заливки
+            rc = lambda pl: next((c for f in name_forms(pl) for c in [geo(f)] if c), [])
+            for a, bs in routes:   # «от X до Y»: полоса вдоль трассы (прямая линия между селами, через все названные)
+                names = [a] + bs; label = " — ".join(names)
+                pk0 = resolve(names, rc)
+                pts = [[pk0[n]["lat"], pk0[n]["lon"]] for n in names if n in pk0]
+                if len(pts) >= 2 and route_len(pts) <= 80:
+                    w = 3000 if route_len(pts) <= 20 else 6000
+                    zr = {"kind": "route", "pts": pts, "w_in": w, "w_out": w + 2000, "r_in": None, "r_out": 0, "place": label,
+                          "lat": sum(x[0] for x in pts) / len(pts), "lon": sum(x[1] for x in pts) / len(pts)}
+                    put(zr, label, p, hhmm); fpos = fpos or zr
+                elif len(pts) == 1:
+                    n1 = next(n for n in names if n in pk0); put(pk0[n1], n1, p, hhmm); fpos = fpos or pk0[n1]
+                else:
+                    unknown.append({"place": label, "time": hhmm})
+                if pts:
+                    for n in names:
+                        if n not in pk0: unknown.append({"place": n, "time": hhmm})   # какое-то из названий не нашлось
             pk = resolve(places, geo)
             for pl in places:
                 pos = pk.get(pl)
@@ -319,6 +378,19 @@ def service_worker():
     r = send_from_directory("static", "sw.js", mimetype="application/javascript")
     r.headers["Cache-Control"] = "no-cache"
     return r
+
+TEST_KEY = os.getenv("TEST_KEY", "")   # пароль режима проверки; если не задан, режим выключен
+
+@app.route("/api/test", methods=["POST"])
+def api_test():
+    """Проверка разбора: текст сообщений (несколько через строку ---) рисуется на карте, данные сайта не меняются."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    texts = [t.strip() for t in re.split(r"\n\s*---+\s*\n", (request.get_json(silent=True) or {}).get("text", "")) if t.strip()][:10]
+    now = time.time()
+    posts = [{"ch": "test", "id": i, "text": t, "ts": now - (len(texts) - i) * 20} for i, t in enumerate(texts)]
+    with lock: out = build(posts)
+    out["weather"] = None; out["status"] = []
+    return jsonify(out)
 
 @app.route("/api/geocache")
 def geocache_dump():   # скачать найденные места, чтобы положить в репозиторий как geocache_seed.json
