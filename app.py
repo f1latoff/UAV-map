@@ -341,17 +341,26 @@ def extract_routes(text):
 
 SUF = [("ского", "ское"), ("ого", "ое"), ("ой", "а"), ("ова", "ово"), ("ева", "ево"), ("ина", "ино"), ("ки", "ка"), ("ни", "нь"), ("ги", "га"), ("ы", "а"), ("а", "")]
 
+TYPEWORD = re.compile(r"^(?:поселок|посёлок|пос\.?|село|с\.|деревня|дер\.|хутор|х\.|станица|город|г\.)\s+", re.I)
+
 def name_forms(ph):
-    """«Никольского» -> «Никольское», «Масловой Пристани» -> «Маслова Пристань»: сначала как написано, потом в начальной форме."""
-    ph = ph.strip(); out = [ph]; full = []
-    for w in ph.split():
-        for a, b in SUF:
-            if w.lower().endswith(a) and len(w) > len(a) + 2:
-                full.append(w[:-len(a)] + b); break
-        else: full.append(w)
-    f = " ".join(full)
-    if f != ph: out.append(f)
-    return out
+    """«Никольского» -> «Никольское», «поселок Дубовое» -> «Дубовое»: сначала как написано, потом без слова «поселок/село», потом в начальной форме."""
+    ph = ph.strip()
+    base = [ph]
+    st = TYPEWORD.sub("", ph).strip()
+    if st and st != ph: base.append(st)
+    out = []
+    for b in base:
+        out.append(b)
+        full = []
+        for w in b.split():
+            for a, c in SUF:
+                if w.lower().endswith(a) and len(w) > len(a) + 2:
+                    full.append(w[:-len(a)] + c); break
+            else: full.append(w)
+        f = " ".join(full)
+        if f != b: out.append(f)
+    return list(dict.fromkeys(out))
 
 def route_len(pts):
     return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
@@ -478,7 +487,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 elif "област" in low: rk["oblast"] = True
                 else:
                     rk["city"] = True; fpos = CENTER   # без места: Белгород и Белгородский район
-            pk = resolve([x for x in places if not BEL.search(x.lower())], geo)
+            pk = resolve([x for x in places if not BEL.search(x.lower())], lambda pl: merge_forms(pl, geo))
             for pl in places:
                 if BEL.search(pl.lower()): rk["city"] = True; fpos = fpos or CENTER
                 else:
