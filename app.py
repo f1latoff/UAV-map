@@ -114,7 +114,7 @@ SETTLE = {"village", "hamlet", "town", "isolated_dwelling", "locality", "farm", 
 DISTRICT = {"suburb", "quarter", "neighbourhood", "city", "administrative", "residential"}
 CITYLIKE = SETTLE | {"city", "suburb", "quarter", "neighbourhood"}
 
-def shape(r, q):
+def _shape(r, q):
     lat, lon = float(r["lat"]), float(r["lon"])
     bb = [float(x) for x in r.get("boundingbox", [lat, lat, lon, lon])]  # юг, север, запад, восток
     size = max((bb[1] - bb[0]) * 111, (bb[3] - bb[2]) * 111 * math.cos(math.radians(lat)))  # км
@@ -124,7 +124,7 @@ def shape(r, q):
         if poly and size <= 150:
             return {"lat": lat, "lon": lon, "kind": "district", "poly": poly, "r_in": None, "r_out": 0}
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
-    if t in SETTLE or t == "city" or (t in ("suburb", "quarter", "neighbourhood") and poly and size <= 15):
+    if t in SETTLE or t == "city" or (t in ("suburb", "quarter", "neighbourhood", "residential") and poly and size <= 15):
         if poly and size <= 60:   # город, посёлок, село: по своей границе
             return {"lat": lat, "lon": lon, "kind": "settlement", "poly": poly, "r_in": None, "r_out": size * 500 + 1000}
         if size <= 12:
@@ -133,6 +133,11 @@ def shape(r, q):
     if t in DISTRICT or size > 12:
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
     return {"lat": lat, "lon": lon, "kind": "object", "r_in": 800, "r_out": 1200}
+
+def shape(r, q):
+    d = _shape(r, q)
+    d["nt"] = r.get("type", "")   # тип объекта в OpenStreetMap (для подсказок в режиме проверки)
+    return d
 
 def normalize(q):
     """«Губкинского ГО» -> «Губкинский городской округ», чтобы поиск по карте понимал название."""
@@ -152,6 +157,9 @@ def split_district(q):
 
 def near_search(query, qs):
     """Сначала ищем рядом с Белгородом (где чаще всего тревоги), если там нет, то по всей области."""
+    if not re.search(r"белгород", query, re.I):   # сначала только сёла Белгородского района: так одноимённые сёла из других районов не мешают
+        r = [x for x in nominatim(query + ", Белгородский район", qs, vb=LOCAL_VB) if x["kind"] == "settlement"]
+        if r: return r
     return nominatim(query, qs, vb=LOCAL_VB) or nominatim(query, qs)
 
 def district_variants(nq):
@@ -255,7 +263,8 @@ def near_bonus(km):
 def resolve(places, cands=candidates):
     """Выбирает место для каждого названия. Из одинаковых сёл чуть предпочитается то, что ближе к Белгороду. Если названий несколько («Никольское» и «Дубовое»), а одинаковых сёл в области много,
     берётся набор, где места ближе всего друг к другу (то есть то Никольское, что рядом с Дубовым)."""
-    cl = {pl: only_settlements(cands(pl)) for pl in places}
+    raw = {pl: cands(pl) for pl in places}
+    cl = {pl: only_settlements(c) for pl, c in raw.items()}
     cl = {pl: sorted(c, key=lambda x: -x["imp"])[:10] for pl, c in cl.items() if c}
     pick = {pl: c[0] for pl, c in cl.items()}
     amb = [pl for pl, c in cl.items() if len(c) > 1][:4]
@@ -268,6 +277,11 @@ def resolve(places, cands=candidates):
                     - 2 * sum(near_bonus(dkm(x, (CENTER["lat"], CENTER["lon"]))) for x in combo))   # пригород Белгорода предпочтительнее
             if best is None or cost < best[0]: best = (cost, combo)
         pick.update(dict(zip(amb, best[1])))
+    for pl in list(pick):   # какие варианты названия были и какой выбран (видно в режиме проверки)
+        c, ch = cl[pl], pick[pl]
+        if len(c) > 1 or len(raw[pl]) > len(c):
+            pick[pl] = {**ch, "dropped": len(raw[pl]) - len(c), "alts": [
+                {"km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "nt": x.get("nt"), "imp": round(x["imp"], 2), "chosen": x is ch} for x in c[:8]]}
     return pick
 
 def rocket_zones():
