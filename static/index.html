@@ -25,12 +25,15 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 .lh{padding:6px 10px;font-weight:bold;cursor:pointer}.lb{padding:0 10px 8px;max-height:45vh;overflow:auto}
 .tb{padding:4px;max-width:200px}.tb button{display:block;width:100%;margin:2px 0;padding:6px 8px;font-size:13px;border:1px solid #ccc;background:#f7f7f7;border-radius:4px;cursor:pointer}
 #me{padding:4px 6px;display:none}
-#panel{position:absolute;z-index:600;background:#fff;display:none;flex-direction:column;box-shadow:0 0 8px #0007;
-  left:0;right:0;bottom:0;max-height:55%}
+#panel{position:absolute;z-index:1100;background:#fff;display:none;flex-direction:column;box-shadow:0 0 8px #0007;
+  left:0;right:0;bottom:0;height:62%;border-radius:16px 16px 0 0}
+#panel.big{height:90%}
+#grip{flex:none;height:24px;cursor:pointer;position:relative}
+#grip::after{content:"";position:absolute;left:50%;top:10px;width:44px;height:5px;margin-left:-22px;border-radius:3px;background:#bbb}
 @media(max-width:699px){.tb button{padding:11px 8px;font-size:15px}.lh{padding:11px 12px;font-size:14px}.lb{font-size:13px}.leaflet-bottom{margin-bottom:env(safe-area-inset-bottom)}}
-@media(min-width:700px){#panel{left:auto;width:380px;top:0;max-height:none}}
+@media(min-width:700px){#panel{left:auto;width:380px;top:0;height:auto;border-radius:0}#grip{display:none}}
 #ph{padding:8px;border-bottom:1px solid #ddd;font-size:13px}#ph input[type=text]{width:100%;box-sizing:border-box;padding:6px;margin-bottom:4px}
-#list{overflow:auto;padding:4px 8px;font-size:13px}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}#pwa{position:absolute;z-index:700;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));display:none;background:#fff;border-radius:10px;box-shadow:0 2px 12px #0008;padding:12px 30px 12px 14px;font-size:14px;line-height:1.5}
+#list{overflow:auto;padding:4px 10px calc(18px + env(safe-area-inset-bottom));font-size:14px;line-height:1.45}.fi{padding:6px 0;border-bottom:1px solid #eee;cursor:pointer}#pwa{position:absolute;z-index:700;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));display:none;background:#fff;border-radius:10px;box-shadow:0 2px 12px #0008;padding:12px 30px 12px 14px;font-size:14px;line-height:1.5}
 #pwa b{display:block;font-size:15px;margin-bottom:4px}#pwa button{margin-top:8px;padding:9px 14px;font-size:14px;border:0;border-radius:6px;background:#1a73e8;color:#fff;cursor:pointer}
 #pwa .x{position:absolute;top:2px;right:6px;margin:0;padding:4px 8px;background:none;color:#666;font-size:22px}#pwa svg{vertical-align:-3px}
 .tb .row{display:flex;gap:4px}.tb .row button{flex:1;margin:2px 0;padding:7px 4px;font-size:12.5px}
@@ -49,7 +52,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 .dark .leaflet-control-attribution{background:rgba(20,24,34,.8)!important;color:#aaa}.dark .leaflet-control-attribution a{color:#8ab4ff}
 .dark #pwa{background:#1f2430;color:#e8e8e8}.dark #pwa .x{color:#aaa}
 .dark #about .ab{background:#1f2430;color:#e8e8e8}.dark #about .warn{background:#3a2d17}.dark #about a{color:#8ab4ff}
-.dark .small{color:#999}.dark #about .abx{color:#aaa}
+.dark .small{color:#999}.dark #grip::after{background:#556}.dark #about .abx{color:#aaa}
 @supports (-webkit-touch-callout:none){#bar{padding-top:28px;height:98px}}
 </style></head>
 <body><div id="bar">Загрузка…</div>
@@ -73,7 +76,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 <h3>Связь</h3>
 <p>Нашли ошибку или есть вопрос? Telegram: <a href="https://t.me/f1latoffr" target="_blank" rel="noopener">@f1latoffr</a></p>
 <p class="small">Проект предоставляется «как есть», без гарантий.</p></div></div>
-<div id="panel"><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
+<div id="panel"><div id="grip" title="Развернуть / свернуть"></div><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
 <label><input type="checkbox" id="fr"> только свежие (до 15 мин)</label>
 <a href="#" id="pc" style="float:right;text-decoration:none">✕ закрыть</a></div><div id="list"></div></div></div>
 <script>
@@ -101,6 +104,7 @@ tb.onAdd=()=>{const c=L.DomUtil.create('div','tb');
   c.innerHTML='<button id="bme">📍 Где я</button><button id="bfeed">☰ Лента и поиск</button><div class="row"><button id="bth"></button><button id="bab">ℹ️ О проекте</button></div><div id="me"></div>';
   L.DomEvent.disableClickPropagation(c);return c};tb.addTo(map);
 $('bfeed').onclick=()=>{panel.style.display=panel.style.display==='flex'?'none':'flex'};
+$('grip').onclick=()=>panel.classList.toggle('big');
 $('pc').onclick=e=>{e.preventDefault();panel.style.display='none'};
 $('fr').onchange=e=>{onlyFresh=e.target.checked;redraw()};
 $('q').oninput=e=>{query=e.target.value;renderFeed()};
@@ -136,7 +140,7 @@ $('bme').onclick=()=>{
 // лента
 const feedItems=()=>{const nq=norm(query);return(D?D.feed:[]).filter(f=>(!onlyFresh||f.age<15)&&(!nq||norm(f.text).includes(nq)))};
 function renderFeed(){const it=feedItems(),l=$('list');
-  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':'🟠'}<br>${esc(f.text)}</div>`).join('')||'Ничего не найдено';
+  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':'🟠'}<br>${esc(f.text)}</div>`).join('')||`<div style="padding:14px 4px;color:#888">${query||onlyFresh?'Ничего не найдено.':'Сейчас нет сообщений об оповещениях. Здесь показываются свежие сообщения каналов.'}</div>`;
   l.querySelectorAll('.fi').forEach(e=>e.onclick=()=>{const f=it[+e.dataset.i];if(f.lat!=null){map.flyTo([f.lat,f.lon],12);if(innerWidth<700)panel.style.display='none'}})}
 // карта
 function redraw(){if(!D)return;const d=D;layer.clearLayers();
