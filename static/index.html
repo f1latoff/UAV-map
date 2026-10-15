@@ -89,6 +89,7 @@ const map=L.map('map').setView([50.6,36.6],9);
 map.attributionControl.setPrefix('Leaflet');   // подпись библиотеки простым текстом, без ссылки
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
 const layer=L.layerGroup().addTo(map);
+let routeLayers=[];
 let first=true,D=null,userPos=null,userMarker=null,onlyFresh=false,query='';
 const $=id=>document.getElementById(id),panel=$('panel');
 // погода в Белгороде (плашка справа внизу, над подписью карты)
@@ -117,7 +118,7 @@ lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
   c.innerHTML='<div class="lh">ⓘ Обозначения</div><div class="lb">'+
   '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br><span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
   '<span style="color:#999">◌</span> Пунктир: возможная зона риска (+1 км)<br>▭ Контур: село или посёлок<br>○ Круг 1,5 км: объект или улица<br>'+
-  '<span style="color:#e99">●</span> Бледная заливка: район<br><b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
+  '<span style="color:#e99">●</span> Бледная заливка: район<br><b style="color:#e00000">━</b> Полоса: участок трассы («от … до …»)<br><b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
   '<span style="color:#8b0000">■</span> Тёмно-красный: ракетная опасность<br><span style="color:#c00">▢</span> Красная рамка карты: ракетная опасность по всей области<br>'+
   '<span style="color:#f80">▢</span> Оранжевая рамка: тревога БПЛА по всей области<br><span style="color:#1a73e8">●</span> Синяя точка: вы</div>';
   L.DomEvent.disableClickPropagation(c);const b=c.querySelector('.lb');b.style.display=innerWidth<700?'none':'block';
@@ -138,7 +139,8 @@ const hav=(a,b,c,d)=>{const r=Math.PI/180,x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)
 function inRing(lon,lat,ring){let c=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const[xi,yi]=ring[i],[xj,yj]=ring[j];if((yi>lat)!=(yj>lat)&&lon<(xj-xi)*(lat-yi)/(yj-yi)+xi)c=!c}return c}
 const polys=g=>g.type==='Polygon'?[g.coordinates]:g.coordinates;
 const inPoly=(lon,lat,g)=>polys(g).some(p=>inRing(lon,lat,p[0])&&!p.slice(1).some(h=>inRing(lon,lat,h)));
-function dist(s,lat,lon){if(s.poly){if(inPoly(lon,lat,s.poly))return 0;let m=1e12;polys(s.poly).forEach(p=>p[0].forEach(([x,y])=>{m=Math.min(m,hav(lat,lon,y,x))}));return m}
+function dseg(lat,lon,a,b){const k=Math.cos(lat*Math.PI/180),x=(lon-a[1])*k*111320,y=(lat-a[0])*111320,dx=(b[1]-a[1])*k*111320,dy=(b[0]-a[0])*111320,t=Math.max(0,Math.min(1,(x*dx+y*dy)/(dx*dx+dy*dy||1)));return Math.hypot(x-t*dx,y-t*dy)}
+function dist(s,lat,lon){if(s.pts){let m=1e12;for(let i=0;i<s.pts.length-1;i++)m=Math.min(m,dseg(lat,lon,s.pts[i],s.pts[i+1]));return Math.max(0,m-s.w_in/2)}if(s.poly){if(inPoly(lon,lat,s.poly))return 0;let m=1e12;polys(s.poly).forEach(p=>p[0].forEach(([x,y])=>{m=Math.min(m,hav(lat,lon,y,x))}));return m}
   return Math.max(0,hav(lat,lon,s.lat,s.lon)-s.r_in)}
 const km=m=>(m/1000).toFixed(1).replace('.',',');
 function renderMe(){const el=$('me');if(!userPos||!D){el.style.display='none';return}
@@ -167,7 +169,9 @@ function renderFeed(){const it=feedItems(),l=$('list');
   l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':'🟠'}<br>${esc(f.text)}</div>`).join('')||`<div style="padding:14px 4px;color:#888">${query||onlyFresh?'Ничего не найдено.':'Сейчас нет сообщений об оповещениях. Здесь показываются свежие сообщения каналов.'}</div>`;
   l.querySelectorAll('.fi').forEach(e=>e.onclick=()=>{const f=it[+e.dataset.i];if(f.lat!=null){map.flyTo([f.lat,f.lon],12);if(innerWidth<700)panel.style.display='none'}})}
 // карта
-function redraw(){if(!D)return;const d=D;layer.clearLayers();
+function updRoutes(){const k=156543.03392*Math.cos(50.6*Math.PI/180)/Math.pow(2,map.getZoom());routeLayers.forEach(l=>l.setStyle({weight:Math.max(5,l._m/k)}))}
+map.on('zoomend',updRoutes);
+function redraw(){if(!D)return;const d=D;layer.clearLayers();routeLayers=[];
   const rs={stroke:false,fillColor:'#b00000',fillOpacity:.45};
   const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
   const R=d.rocket;
@@ -177,6 +181,10 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();
   const ms=d.markers.filter(m=>!onlyFresh||m.age<15);
   ms.forEach(m=>{const fr=m.age<15,col=fr?'#e00000':'#ff8800',fo=fr?.45:.3;
     const pop=`<b>${esc(m.place)}</b><br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
+    if(m.kind==='route'){const o={lineCap:'round',lineJoin:'round'};
+      const a=L.polyline(m.pts,{...o,color:col,weight:10,opacity:.12}).addTo(layer);a._m=m.w_out;
+      const b=L.polyline(m.pts,{...o,color:col,weight:8,opacity:fr?.5:.35}).bindPopup(pop).addTo(layer);b._m=m.w_in;
+      routeLayers.push(a,b);return}
     if(m.kind==='district'){shape(m,{color:col,weight:1,fillOpacity:.12}).bindPopup(pop).addTo(layer);return}
     L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fillOpacity:.07}).addTo(layer);
     shape(m,{color:col,weight:m.n>1?4:2,fillOpacity:fo}).bindPopup(pop).addTo(layer)});
@@ -190,11 +198,23 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();
   $('bar').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}. `+
     (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
     '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
-  renderFeed();renderMe();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
+  updRoutes();renderFeed();renderMe();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
 async function refresh(){
   try{D=await (await fetch('/api/markers')).json();redraw()}
   catch(e){$('bar').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
-refresh();setInterval(refresh,15000);
+const TK=new URLSearchParams(location.search).get('test');
+if(TK){testMode(TK)}else{refresh();setInterval(refresh,15000)}
+function testMode(key){
+  document.title='Проверка разбора';
+  const b=document.createElement('div');
+  b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px';
+  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea><button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <span id="ts"></span>';
+  document.body.appendChild(b);
+  $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
+    try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
+      if(!r.ok){$('ts').textContent='нет доступа (проверьте пароль в адресе)';return}
+      D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')}
+    catch(e){$('ts').textContent='ошибка'}}}
 
 // тема (Авто / Ночь / День) и окно «О проекте»
 (function(){
