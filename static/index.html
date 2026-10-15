@@ -210,8 +210,8 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
     if(m.kind==='district'){   // район: бледная заливка и тонкий контур
       shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin'}).bindPopup(pop).addTo(layer);
       shape(m,{color:col,weight:1,fill:false,pane:'zLine',interactive:false}).addTo(layer);return}
-    if(!(m.poly&&m.r_out>6000))L.circle([m.lat,m.lon],{radius:m.r_out,stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin',interactive:false}).addTo(layer);   // возможная зона риска (+1 км)
-    if(!(m.poly&&m.r_out>6000))L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fill:false,opacity:.7,pane:'zLine',interactive:false}).addTo(layer);
+    if(!m.poly)L.circle([m.lat,m.lon],{radius:m.r_out,stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin',interactive:false}).addTo(layer);   // возможная зона риска (+1 км)
+    if(!m.poly)L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fill:false,opacity:.7,pane:'zLine',interactive:false}).addTo(layer);
     shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:fp}).bindPopup(pop).addTo(layer);
     shape(m,{color:col,weight:m.n>1?4:2,fill:false,pane:'zLine',interactive:false}).addTo(layer)});
   if(first&&layer.getLayers().length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
