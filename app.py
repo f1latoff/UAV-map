@@ -93,8 +93,9 @@ def extract_places(text):
     t = re.sub(r"^\s*(внимание|отбой)[,!.:\s]*", "", text, flags=re.I)
     head = re.split(STOP, t, maxsplit=1, flags=re.I)[0]
     out = []
-    for p in re.split(r"[\n,;:.!]|\bтакже\b|\bи\b", head, flags=re.I):
+    for p in re.split(r"[\n,;:.!]|\bа\s+также\b|\bи\s+также\b|\bтакже\b|\bплюс\b|\bеще\b|\bещё\b|\bи\b", head, flags=re.I):
         p = re.sub(r"\s+", " ", re.sub(NOISE, " ", p, flags=re.I)).strip(" \"'«»-")
+        p = re.sub(r"\s+", " ", re.sub(r"(?<!\S)(?:а|и|в|во|на|по|к|у|с|со|о|об)(?!\S)", " ", p, flags=re.I)).strip(" \"'«»-")   # одиночные предлоги и союзы («дубовое а»)
         p = re.sub(r"^(?:в\s+)?район[ае]?\s+|^(?:рядом\s+с|около|возле|вблизи|недалеко\s+от|над|на)\s+", "", p, flags=re.I).strip()
         if p.lower() in ("район", "района", "районе"): continue
         if len(p) > 2 and not re.search(NEIGH, p, re.I):
