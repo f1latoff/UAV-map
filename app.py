@@ -361,6 +361,46 @@ def level_of(text):
     if STRONG.search(text): return "alarm"
     return "danger" if DANGER.search(text) else "alarm"
 
+OV = {"t": 0}
+
+def overpass_outline(lat, lon):
+    """Контур застройки села (landuse=residential) из OpenStreetMap через Overpass. Возвращает (контур или None, ответил ли сервис)."""
+    if time.time() - OV["t"] < 600: return None, False   # после сбоя 10 минут не пробуем
+    try:
+        r = requests.get("https://overpass-api.de/api/interpreter", headers={"User-Agent": UA}, timeout=10,
+                         params={"data": f'[out:json][timeout:8];way(around:1000,{lat},{lon})["landuse"="residential"];out geom;'})
+        r.raise_for_status()
+        els = r.json().get("elements", [])
+    except Exception as e:
+        print("overpass error:", e); OV["t"] = time.time(); return None, False
+    polys = []
+    for w in els:
+        pts = [[p["lon"], p["lat"]] for p in w.get("geometry", [])]
+        if len(pts) < 4: continue
+        if pts[0] != pts[-1]: pts.append(pts[0])
+        if len(pts) > 40:
+            step = len(pts) // 40 + 1
+            pts = pts[::step] + [pts[0]]
+        cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+        if math.hypot((cy - lat) * 111, (cx - lon) * 111 * math.cos(math.radians(lat))) <= 1.5:   # только застройка рядом с центром села
+            polys.append([pts])
+    return ({"type": "MultiPolygon", "coordinates": polys[:25]} if polys else None), True
+
+def with_outline(pos):
+    """У села в OpenStreetMap обычно есть только точка, поэтому рисуем по контуру его застройки; если не нашлось, остаётся круг."""
+    if pos.get("kind") != "settlement" or pos.get("poly") or pos.get("imp") == 1: return pos
+    key = f"__ov_{pos['lat']:.3f}_{pos['lon']:.3f}"
+    if key not in geocache:
+        g, ok = overpass_outline(pos["lat"], pos["lon"])
+        if not ok: return pos   # сервис не ответил: «нет контура» не запоминаем
+        geocache[key] = g or ""
+        json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+    g = geocache.get(key)
+    if not g: return pos
+    xs = [p[0] for poly in g["coordinates"] for p in poly[0]]; ys = [p[1] for poly in g["coordinates"] for p in poly[0]]
+    size = max((max(ys) - min(ys)) * 111, (max(xs) - min(xs)) * 111 * math.cos(math.radians(pos["lat"])))
+    return {**pos, "poly": g, "r_in": None, "r_out": size * 500 + 700}
+
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
 def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone):
@@ -433,7 +473,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 if pts:
                     for n in names:
                         if n not in pk0: unknown.append({"place": n, "time": hhmm})   # какое-то из названий не нашлось
-            pk = resolve(places, rc)
+            pk = {k: with_outline(v) for k, v in resolve(places, rc).items()}
             for pl in places:
                 pos = pk.get(pl)
                 if not pos:
