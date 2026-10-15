@@ -72,7 +72,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 <h3>Источники данных</h3>
 <p>Сообщения из открытых Telegram-каналов, права на них принадлежат авторам каналов. Места определяются по данным OpenStreetMap, карта © участники OpenStreetMap. Погода: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>.</p>
 <h3>Конфиденциальность</h3>
-<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет.</p>
+<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет. Погоду обычно получает наш сервер; если у него не вышло, ваш браузер запрашивает её у сервиса Open-Meteo сам, и тот при этом видит ваш IP-адрес.</p>
 <h3>Установка как приложения</h3>
 <p>iPhone: в Safari нажмите «Поделиться» → «На экран “Домой”». Android: кнопка «Установить» в браузере.</p>
 <h3>Связь</h3>
@@ -95,6 +95,20 @@ wxc.onAdd=()=>{const c=L.DomUtil.create('div','wx');c.style.display='none';retur
 function showWeather(w){const el=wxc.getContainer();if(!w){el.style.display='none';return}
   el.style.display='block';el.title='Погода в Белгороде';
   el.textContent=`${w.icon} ${w.temp>0?'+':w.temp<0?'−':''}${Math.abs(w.temp)}° ${w.label}`}
+// запасной вариант: если сервер не получил погоду, браузер спросит её сам (раз в 15 минут)
+const WMO={"0": ["☀️", "Ясно"], "1": ["🌤", "Малооблачно"], "2": ["⛅", "Облачно"], "3": ["☁️", "Пасмурно"], "45": ["🌫", "Туман"], "48": ["🌫", "Туман"], "51": ["🌦", "Морось"], "53": ["🌦", "Морось"], "55": ["🌦", "Морось"], "56": ["🌧", "Ледяная морось"], "57": ["🌧", "Ледяная морось"], "61": ["🌧", "Дождь"], "63": ["🌧", "Дождь"], "65": ["🌧", "Сильный дождь"], "66": ["🌧", "Ледяной дождь"], "67": ["🌧", "Ледяной дождь"], "71": ["🌨", "Снег"], "73": ["🌨", "Снег"], "75": ["🌨", "Сильный снег"], "77": ["🌨", "Снежная крупа"], "80": ["🌦", "Ливень"], "81": ["🌦", "Ливень"], "82": ["🌧", "Сильный ливень"], "85": ["🌨", "Снегопад"], "86": ["🌨", "Снегопад"], "95": ["⛈", "Гроза"], "96": ["⛈", "Гроза с градом"], "99": ["⛈", "Гроза с градом"]};
+let wxLocal=null,wxT=0,wxTry=0;
+async function browserWeather(){
+  const now=Date.now();
+  try{const c=JSON.parse(localStorage.getItem('wx')||'null');if(c&&now-c.t<9e5){wxLocal=c.d;wxT=c.t;showWeather(wxLocal);return}}catch(e){}
+  if(now-wxTry<60000)return;wxTry=now;
+  try{const ctl=new AbortController();setTimeout(()=>ctl.abort(),7000);
+    const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude=50.5997&longitude=36.5987&current=temperature_2m,weather_code,is_day&timezone=Europe%2FMoscow',{signal:ctl.signal});
+    const c=(await r.json()).current;let [icon,label]=WMO[c.weather_code]||['🌡','Погода'];
+    if(!c.is_day&&(icon==='☀️'||icon==='🌤'))icon='🌙';
+    wxLocal={temp:Math.round(c.temperature_2m),icon,label};wxT=now;
+    try{localStorage.setItem('wx',JSON.stringify({t:now,d:wxLocal}))}catch(e){}
+    showWeather(wxLocal)}catch(e){}}
 // легенда (сворачивается)
 const lg=L.control({position:innerWidth<700?'topleft':'bottomleft'});
 lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
@@ -174,7 +188,7 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();
   $('bar').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}. `+
     (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
     '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
-  renderFeed();renderMe();showWeather(d.weather)}
+  renderFeed();renderMe();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
 async function refresh(){
   try{D=await (await fetch('/api/markers')).json();redraw()}
   catch(e){$('bar').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
