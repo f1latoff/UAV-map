@@ -16,8 +16,8 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
-GEO = "geocache4.json"
-geocache = {k: v for k, v in (json.load(open("geocache_seed2.json")) if os.path.exists("geocache_seed2.json") else {}).items() if v}
+GEO = "geocache5.json"
+geocache = {k: v for k, v in (json.load(open("geocache_seed3.json")) if os.path.exists("geocache_seed3.json") else {}).items() if v}
 if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 outlines = json.load(open("outlines.json")) if os.path.exists("outlines.json") else {}   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
@@ -34,6 +34,7 @@ ALIASES = [   # места, которые каналы называют по-с
     (re.compile(r"\bаэропорт\w*", re.I), 50.6439, 36.5900, 1500),                                         # аэропорт Белгорода (примерно)
     (re.compile(r"сити\s*-?\s*молл\w*", re.I), 50.552568, 36.568031, 800),                              # ТЦ «Сити Молл» (центр)
     (re.compile(r"\bвокзал\w*", re.I), 50.5940, 36.6040, 800),                                           # железнодорожный вокзал Белгорода (примерно; «автовокзал» сюда не входит)
+    (re.compile(r"^\W*юго-?запад\w*\W*$", re.I), 50.5735, 36.5522, 2000),                              # «Юго-Западный» = юго-западная часть города
     (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 400),                           # кольцо «Я люблю Белгород»
 ]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
@@ -126,7 +127,7 @@ def _shape(r, q):
         if poly and size <= 150:
             return {"lat": lat, "lon": lon, "kind": "district", "poly": poly, "r_in": None, "r_out": 0}
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
-    if t in PLACE or (t == "administrative" and size <= 12 and poly):   # город, посёлок, село, микрорайон: всегда одного вида (по границе или кругом)
+    if t in PLACE or (t == "administrative" and size <= (40 if poly else 12)):   # город, посёлок, село, микрорайон: всегда одного вида (по границе или кругом)
         if poly and size <= 60:
             return {"lat": lat, "lon": lon, "kind": "settlement", "poly": poly, "r_in": None, "r_out": size * 500 + 1000}
         r_in = min(3000, max(1000, size * 500)) if size <= 12 else 3000
@@ -157,13 +158,20 @@ def split_district(q):
     return None
 
 def near_search(query, qs):
-    """Сначала ищем рядом с Белгородом (где чаще всего тревоги), если там нет, то по всей области."""
-    if not re.search(r"белгород", query, re.I):   # сначала только сёла Белгородского района: так одноимённые сёла из других районов не мешают
-        r = [x for x in nominatim(query + ", Белгородский район", qs, vb=LOCAL_VB) if x["kind"] == "settlement"]
-        if r: return r
-    loc = nominatim(query, qs, vb=LOCAL_VB)
-    if any(x["kind"] == "settlement" for x in loc): return loc   # рядом нашлось настоящее село или город
-    return nominatim(query, qs) or loc                            # иначе ищем по всей области (рядом могла найтись только дорога с таким названием)
+    """Сначала ищем в Белгородском районе и рядом с Белгородом, потом добавляем города с таким названием из всей области."""
+    res = []
+    if not re.search(r"белгород", query, re.I):   # сначала только сёла Белгородского района: одноимённые сёла из других районов не мешают
+        res = [x for x in nominatim(query + ", Белгородский район", qs, vb=LOCAL_VB) if x["kind"] == "settlement"]
+    loc = []
+    if not res:
+        loc = nominatim(query, qs, vb=LOCAL_VB)
+        if any(x["kind"] == "settlement" for x in loc): res = loc
+    if not any(x.get("nt") in ("town", "city") for x in res):   # рядом города нет: смотрим, нет ли города с таким названием дальше (Алексеевка, Новый Оскол…)
+        wide = nominatim(query, qs)
+        seen = {(round(x["lat"], 3), round(x["lon"], 3)) for x in res}
+        res = res + [x for x in wide if x.get("nt") in ("town", "city") and (round(x["lat"], 3), round(x["lon"], 3)) not in seen]
+        if not res: res = wide or loc
+    return res
 
 def district_variants(nq):
     """«Губкинский район» -> перебор: район, городской округ, муниципальный округ."""
@@ -172,11 +180,25 @@ def district_variants(nq):
     b = m.group(1)
     return [f"{b} район", f"{b} городской округ", f"{b} муниципальный округ", f"{b} округ"]
 
+KEEP = ("lat", "lon", "type", "class", "display_name", "boundingbox", "importance")
+
+def slim(x):
+    d = {k: x[k] for k in KEEP if k in x}
+    g = x.get("geojson") or {}
+    d["geojson"] = g if g.get("type") in ("Polygon", "MultiPolygon") and x.get("class") in (None, "boundary", "place") else {"type": "Point", "coordinates": [float(x["lon"]), float(x["lat"])]}
+    return d
+
 def nominatim(query, q_for_shape, limit=10, vb=None):
-    r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
-        params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": vb or VIEWBOX, "bounded": 1,
-                "polygon_geojson": 1, "polygon_threshold": 0.003 if re.search(r"район|округ", q_for_shape.lower()) else 0.001}).json()
-    time.sleep(1.1)
+    thr = 0.003 if re.search(r"район|округ", q_for_shape.lower()) else 0.001
+    key = f"nr|{vb or ''}|{limit}|{thr}|{query.lower()}"
+    r = geocache.get(key)
+    if r is None:   # сырой ответ карты запоминается (и попадает в файл «найденные места»)
+        r = [slim(x) for x in requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
+            params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": vb or VIEWBOX, "bounded": 1,
+                    "polygon_geojson": 1, "polygon_threshold": thr}).json()]
+        time.sleep(1.1)
+        geocache[key] = r
+        json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     name = lambda x: x.get("display_name", "").split(",")[0].strip().lower()
     isp = lambda x: (x.get("geojson") or {}).get("type") in ("Polygon", "MultiPolygon")
     def bsz(x):   # размер объекта по его рамке, км
@@ -225,9 +247,6 @@ def candidates(q):
     for rx, la, lo, rad in ALIASES:
         if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}]
     if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
-    if low in geocache:
-        c = geocache[low]
-        return [c] if isinstance(c, dict) else (c or [])
     try:
         nq = normalize(q)
         sd = split_district(nq)
@@ -250,8 +269,6 @@ def candidates(q):
             res = near_search(nq, q)
     except Exception:
         return []
-    geocache[low] = res
-    json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     return res
 
 def dkm(a, b):
@@ -717,7 +734,7 @@ def api_test():
 @app.route("/api/geocache")
 def geocache_dump():   # скачать найденные места, чтобы положить в репозиторий как geocache_seed.json
     body = json.dumps({k: v for k, v in geocache.items() if v}, ensure_ascii=False)
-    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=geocache_seed2.json"})
+    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=geocache_seed3.json"})
 
 @app.route("/")
 def index(): return send_from_directory("static", "index.html")
