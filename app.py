@@ -161,7 +161,9 @@ def near_search(query, qs):
     if not re.search(r"белгород", query, re.I):   # сначала только сёла Белгородского района: так одноимённые сёла из других районов не мешают
         r = [x for x in nominatim(query + ", Белгородский район", qs, vb=LOCAL_VB) if x["kind"] == "settlement"]
         if r: return r
-    return nominatim(query, qs, vb=LOCAL_VB) or nominatim(query, qs)
+    loc = nominatim(query, qs, vb=LOCAL_VB)
+    if any(x["kind"] == "settlement" for x in loc): return loc   # рядом нашлось настоящее село или город
+    return nominatim(query, qs) or loc                            # иначе ищем по всей области (рядом могла найтись только дорога с таким названием)
 
 def district_variants(nq):
     """«Губкинский район» -> перебор: район, городской округ, муниципальный округ."""
@@ -176,10 +178,19 @@ def nominatim(query, q_for_shape, limit=10, vb=None):
                 "polygon_geojson": 1, "polygon_threshold": 0.003 if re.search(r"район|округ", q_for_shape.lower()) else 0.001}).json()
     time.sleep(1.1)
     name = lambda x: x.get("display_name", "").split(",")[0].strip().lower()
-    polys = {name(x): x["geojson"] for x in r if (x.get("geojson") or {}).get("type") in ("Polygon", "MultiPolygon")}
+    isp = lambda x: (x.get("geojson") or {}).get("type") in ("Polygon", "MultiPolygon")
+    def bsz(x):   # размер объекта по его рамке, км
+        try:
+            bb = [float(v) for v in x["boundingbox"]]; la = float(x["lat"])
+            return max((bb[1] - bb[0]) * 111, (bb[3] - bb[2]) * 111 * math.cos(math.radians(la)))
+        except Exception: return 99
+    # границу берём только у настоящих границ или населённых мест (не у ж/д станции, промзоны и т. п.) и только если она не крошечная
+    polys = {name(x): x["geojson"] for x in r if isp(x) and x.get("class") in (None, "boundary", "place") and bsz(x) >= 0.3}
     out = []
     for x in r:
-        if (x.get("geojson") or {}).get("type") not in ("Polygon", "MultiPolygon") and x.get("type") in CITYLIKE and name(x) in polys:
+        if isp(x) and x.get("type") in CITYLIKE and bsz(x) < 0.3:
+            x = {**x, "geojson": None}   # крошечный «контур» вместо границы села: не используем
+        elif not isp(x) and x.get("type") in CITYLIKE and name(x) in polys:
             x = {**x, "geojson": polys[name(x)]}   # у города/села граница лежит в соседнем результате с тем же названием
         out.append({**shape(x, q_for_shape), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)})
     return out
@@ -227,9 +238,14 @@ def candidates(q):
             if res and hint:
                 res = [min(res, key=lambda x: dkm(x, (hint[0]["lat"], hint[0]["lon"])))]
         if not res:
-            for v in (district_variants(nq) or []):   # «Губкинский район» на карте это городской округ
-                res = nominatim(v, v)
-                if res: break
+            fallback = []
+            for v in (district_variants(nq) or []):   # «Губкинский район» на карте это городской округ: ищем вариант с настоящей границей
+                got = nominatim(v, v)
+                if any(c.get("poly") for c in got):
+                    res = [c for c in got if c.get("poly")] + [c for c in got if not c.get("poly")]
+                    break
+                if got and not fallback: fallback = got   # запасной вариант без границы (круг)
+            res = res or fallback
         if not res:
             res = near_search(nq, q)
     except Exception:
@@ -386,6 +402,41 @@ def name_forms(ph):
         f = " ".join(full)
         if f != b: out.append(f)
     return list(dict.fromkeys(out))
+
+def buffer_polygon(pts, half_m, steps=8):
+    """Полоса заданной ширины вдоль ломаной (скруглённые концы и углы) как один многоугольник: чтобы участок трассы выглядел так же, как остальные зоны."""
+    lat0 = sum(p[0] for p in pts) / len(pts)
+    kx, ky = 111320 * math.cos(math.radians(lat0)), 110540.0
+    P = [(p[1] * kx, p[0] * ky) for p in pts]
+    d = [(b[0] - a[0], b[1] - a[1]) for a, b in zip(P, P[1:])]
+    d = [(x / (math.hypot(x, y) or 1), y / (math.hypot(x, y) or 1)) for x, y in d]
+    ln = [(-y, x) for x, y in d]                                  # левые нормали сегментов
+    ang = lambda n: math.atan2(n[1], n[0])
+    def side(sgn):
+        out = [(P[0][0] + sgn * half_m * ln[0][0], P[0][1] + sgn * half_m * ln[0][1])]
+        for i in range(1, len(P) - 1):
+            n0, n1 = ln[i - 1], ln[i]
+            left_turn = d[i - 1][0] * d[i][1] - d[i - 1][1] * d[i][0] > 0
+            inner = left_turn if sgn > 0 else not left_turn
+            if inner:   # внутренняя сторона поворота: одна точка
+                mx, my = n0[0] + n1[0], n0[1] + n1[1]
+                L = math.hypot(mx, my) or 1.0
+                k = max(L / 2, 0.25)
+                out.append((P[i][0] + sgn * half_m * mx / L / k, P[i][1] + sgn * half_m * my / L / k))
+            else:       # внешняя сторона: дуга
+                a0, a1 = ang((sgn * n0[0], sgn * n0[1])), ang((sgn * n1[0], sgn * n1[1]))
+                da = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+                out += [(P[i][0] + half_m * math.cos(a0 + da * t / 4), P[i][1] + half_m * math.sin(a0 + da * t / 4)) for t in range(5)]
+        out.append((P[-1][0] + sgn * half_m * ln[-1][0], P[-1][1] + sgn * half_m * ln[-1][1]))
+        return out
+    L_, R_ = side(1), side(-1)
+    aN, a0 = ang(ln[-1]), ang(ln[0])
+    end = [(P[-1][0] + half_m * math.cos(aN - math.pi * t / steps), P[-1][1] + half_m * math.sin(aN - math.pi * t / steps)) for t in range(1, steps)]
+    start = [(P[0][0] + half_m * math.cos(a0 + math.pi - math.pi * t / steps), P[0][1] + half_m * math.sin(a0 + math.pi - math.pi * t / steps)) for t in range(1, steps)]
+    ring = L_ + end + R_[::-1] + start
+    ring = [[x / kx, y / ky] for x, y in ring]
+    ring.append(ring[0])
+    return {"type": "Polygon", "coordinates": [ring]}
 
 def route_len(pts):
     return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
@@ -563,7 +614,8 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 if len(pts) >= 2 and route_len(pts) <= 50:
                     w = 3000 if route_len(pts) <= 20 else 6000
                     zr = {"kind": "route", "pts": pts, "w_in": w, "w_out": w + 2000, "r_in": None, "r_out": 0, "place": label,
-                          "lat": sum(x[0] for x in pts) / len(pts), "lon": sum(x[1] for x in pts) / len(pts)}
+                          "lat": sum(x[0] for x in pts) / len(pts), "lon": sum(x[1] for x in pts) / len(pts),
+                          "poly": buffer_polygon(pts, w / 2)}
                     put(zr, label, p, hhmm, lvl); fpos = fpos or zr
                 elif len(pts) == 1:
                     n1 = next(n for n in names if n in pk0); put(pk0[n1], n1, p, hhmm, lvl); fpos = fpos or pk0[n1]
