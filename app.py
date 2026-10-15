@@ -277,11 +277,18 @@ def merge_forms(pl, geo):
 def near_bonus(km):
     return 0.6 if km <= 20 else 0.25 if km <= 40 else 0
 
+def prefer_towns(c):
+    """Город с тем же названием, что и село, важнее, если села поблизости от Белгорода (до 25 км) нет: так Волоконовка = город, а не маленькое село."""
+    towns = [x for x in c if x.get("nt") in ("town", "city")]
+    if towns and len(towns) < len(c) and not any(dkm(x, (CENTER["lat"], CENTER["lon"])) <= 25 for x in c if x not in towns):
+        return towns
+    return c
+
 def resolve(places, cands=candidates):
     """Выбирает место для каждого названия. Из одинаковых сёл чуть предпочитается то, что ближе к Белгороду. Если названий несколько («Никольское» и «Дубовое»), а одинаковых сёл в области много,
     берётся набор, где места ближе всего друг к другу (то есть то Никольское, что рядом с Дубовым)."""
     raw = {pl: cands(pl) for pl in places}
-    cl = {pl: only_settlements(c) for pl, c in raw.items()}
+    cl = {pl: prefer_towns(only_settlements(c)) for pl, c in raw.items()}
     cl = {pl: sorted(c, key=lambda x: -x["imp"])[:10] for pl, c in cl.items() if c}
     pick = {pl: c[0] for pl, c in cl.items()}
     amb = [pl for pl, c in cl.items() if len(c) > 1][:4]
@@ -290,7 +297,11 @@ def resolve(places, cands=candidates):
         best = None
         for combo in itertools.product(*[cl[pl] for pl in amb]):
             pts = fixed + list(combo)
-            cost = (sum(dkm(a, (b["lat"], b["lon"])) for k, a in enumerate(pts) for b in pts[k + 1:]) - 2 * sum(x["imp"] for x in combo)
+            near = 0   # для каждого неоднозначного места считаем расстояние до ближайшего другого названного места (дальние соседи не тянут за собой)
+            for a in combo:
+                others = [p for p in pts if p is not a]
+                if others: near += min(min(dkm(a, (b["lat"], b["lon"])) for b in others), 100)
+            cost = (near - 2 * sum(x["imp"] for x in combo)
                     - 2 * sum(near_bonus(dkm(x, (CENTER["lat"], CENTER["lon"]))) for x in combo))   # пригород Белгорода предпочтительнее
             if best is None or cost < best[0]: best = (cost, combo)
         pick.update(dict(zip(amb, best[1])))
