@@ -19,6 +19,7 @@ GEO = "geocache4.json"
 geocache = {k: v for k, v in (json.load(open("geocache_seed2.json")) if os.path.exists("geocache_seed2.json") else {}).items() if v}
 if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
+outlines = json.load(open("outlines.json")) if os.path.exists("outlines.json") else {}   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
@@ -30,6 +31,8 @@ ALIASES = [   # места, которые каналы называют по-с
     (re.compile(r"\bбабочк\w*", re.I), 50.568621, 36.460408, 500),                                    # развязка «Бабочка» (М-2, 674-й км)
     (re.compile(r"^\W*развязк\w*\W*$", re.I), 50.521067, 36.704759, 500),                              # просто «развязка» (маршрут «от развязки до …», у Разумного)
     (re.compile(r"\bаэропорт\w*", re.I), 50.6439, 36.5900, 1500),                                         # аэропорт Белгорода (примерно)
+    (re.compile(r"сити\s*-?\s*молл\w*", re.I), 50.552568, 36.568031, 800),                              # ТЦ «Сити Молл» (центр)
+    (re.compile(r"\bвокзал\w*", re.I), 50.5940, 36.6040, 800),                                           # железнодорожный вокзал Белгорода (примерно; «автовокзал» сюда не входит)
     (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 400),                           # кольцо «Я люблю Белгород»
 ]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
@@ -361,45 +364,84 @@ def level_of(text):
     if STRONG.search(text): return "alarm"
     return "danger" if DANGER.search(text) else "alarm"
 
-OV = {"t": 0}
+OV = {"t": 0, "err": ""}
+OV_URLS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"]
+
+def hull(pts):
+    """Выпуклая оболочка точек (для застройки, заданной составным контуром)."""
+    pts = sorted(set(map(tuple, pts)))
+    if len(pts) < 3: return pts
+    cross = lambda o, a, b: (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, up = [], []
+    for p in pts:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p) <= 0: lo.pop()
+        lo.append(p)
+    for p in reversed(pts):
+        while len(up) >= 2 and cross(up[-2], up[-1], p) <= 0: up.pop()
+        up.append(p)
+    return lo[:-1] + up[:-1]
+
+def norm_geo(g):
+    if g.get("type") == "FeatureCollection": g = g["features"][0]
+    if g.get("type") == "Feature": g = g["geometry"]
+    return g
 
 def overpass_outline(lat, lon):
-    """Контур застройки села (landuse=residential) из OpenStreetMap через Overpass. Возвращает (контур или None, ответил ли сервис)."""
-    if time.time() - OV["t"] < 600: return None, False   # после сбоя 10 минут не пробуем
-    try:
-        r = requests.get("https://overpass-api.de/api/interpreter", headers={"User-Agent": UA}, timeout=10,
-                         params={"data": f'[out:json][timeout:8];way(around:1000,{lat},{lon})["landuse"="residential"];out geom;'})
-        r.raise_for_status()
-        els = r.json().get("elements", [])
-    except Exception as e:
-        print("overpass error:", e); OV["t"] = time.time(); return None, False
+    """Контур застройки села (landuse=residential) из OpenStreetMap через Overpass. Возвращает (контур или None, причина, если контура нет)."""
+    if time.time() - OV["t"] < 600: return None, "пауза после сбоя Overpass: " + OV["err"]
+    q = f'[out:json][timeout:10];(way(around:1000,{lat},{lon})["landuse"="residential"];relation(around:1000,{lat},{lon})["landuse"="residential"];);out geom;'
+    els, errs = None, []
+    for u in OV_URLS:   # если один сервер не ответил, пробуем следующий
+        try:
+            r = requests.get(u, headers={"User-Agent": UA}, timeout=14, params={"data": q})
+            r.raise_for_status()
+            els = r.json().get("elements", []); break
+        except Exception as e:
+            errs.append(f"{u.split('/')[2]}: {type(e).__name__} {str(e)[:60]}")
+    if els is None:
+        OV["t"] = time.time(); OV["err"] = "; ".join(errs)[:300]; print("overpass error:", OV["err"])
+        return None, "Overpass не ответил (" + OV["err"] + ")"
     polys = []
     for w in els:
-        pts = [[p["lon"], p["lat"]] for p in w.get("geometry", [])]
-        if len(pts) < 4: continue
-        if pts[0] != pts[-1]: pts.append(pts[0])
-        if len(pts) > 40:
-            step = len(pts) // 40 + 1
-            pts = pts[::step] + [pts[0]]
-        cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+        if w.get("type") == "relation":   # составной контур: берём выпуклую оболочку внешних линий
+            ring = [list(p) for p in hull([[p["lon"], p["lat"]] for m in w.get("members", []) if m.get("role") == "outer" for p in m.get("geometry", [])])]
+            if len(ring) < 3: continue
+            ring.append(ring[0])
+        else:
+            ring = [[p["lon"], p["lat"]] for p in w.get("geometry", [])]
+            if len(ring) < 4: continue
+            if ring[0] != ring[-1]: ring.append(ring[0])
+        if len(ring) > 41:
+            step = len(ring) // 40 + 1
+            ring = ring[::step] + [ring[0]]
+        cx, cy = sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring)
         if math.hypot((cy - lat) * 111, (cx - lon) * 111 * math.cos(math.radians(lat))) <= 1.5:   # только застройка рядом с центром села
-            polys.append([pts])
-    return ({"type": "MultiPolygon", "coordinates": polys[:25]} if polys else None), True
+            polys.append([ring])
+    if not polys: return None, "в карте нет нарисованной застройки рядом с селом (Overpass ответил, но пусто)"
+    return {"type": "MultiPolygon", "coordinates": polys[:25]}, ""
 
-def with_outline(pos):
-    """У села в OpenStreetMap обычно есть только точка, поэтому рисуем по контуру его застройки; если не нашлось, остаётся круг."""
+def as_poly(pos, g):
+    rings = [g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]
+    xs = [p[0] for r in rings for p in r]; ys = [p[1] for r in rings for p in r]
+    size = max((max(ys) - min(ys)) * 111, (max(xs) - min(xs)) * 111 * math.cos(math.radians(pos["lat"])))
+    return {**pos, "poly": g, "r_in": None, "r_out": size * 500 + 700}
+
+def with_outline(pos, name=""):
+    """Село рисуем по контуру: сначала нарисованный вручную (outlines.json), потом застройка из OpenStreetMap; иначе остаётся круг (с пометкой, почему)."""
     if pos.get("kind") != "settlement" or pos.get("poly") or pos.get("imp") == 1: return pos
+    low = name.lower()
+    for k, g in outlines.items():
+        if k in low: return as_poly(pos, norm_geo(g))
     key = f"__ov_{pos['lat']:.3f}_{pos['lon']:.3f}"
+    why = ""
     if key not in geocache:
-        g, ok = overpass_outline(pos["lat"], pos["lon"])
-        if not ok: return pos   # сервис не ответил: «нет контура» не запоминаем
+        g, why = overpass_outline(pos["lat"], pos["lon"])
+        if g is None and not why.startswith("в карте нет"): return {**pos, "why": why}   # сбой: «нет контура» не запоминаем
         geocache[key] = g or ""
         json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
     g = geocache.get(key)
-    if not g: return pos
-    xs = [p[0] for poly in g["coordinates"] for p in poly[0]]; ys = [p[1] for poly in g["coordinates"] for p in poly[0]]
-    size = max((max(ys) - min(ys)) * 111, (max(xs) - min(xs)) * 111 * math.cos(math.radians(pos["lat"])))
-    return {**pos, "poly": g, "r_in": None, "r_out": size * 500 + 700}
+    if not g: return {**pos, "why": why or "в карте нет нарисованной застройки рядом с селом (запомнено)"}
+    return as_poly(pos, g)
 
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
@@ -473,7 +515,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 if pts:
                     for n in names:
                         if n not in pk0: unknown.append({"place": n, "time": hhmm})   # какое-то из названий не нашлось
-            pk = {k: with_outline(v) for k, v in resolve(places, rc).items()}
+            pk = {k: with_outline(v, k) for k, v in resolve(places, rc).items()}
             for pl in places:
                 pos = pk.get(pl)
                 if not pos:
