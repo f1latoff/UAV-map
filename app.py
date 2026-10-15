@@ -176,18 +176,19 @@ def split_district(q):
     return None
 
 def near_search(query, qs):
-    """Сначала ищем в Белгородском районе и рядом с Белгородом, потом добавляем города с таким названием из всей области."""
-    res = []
-    if not re.search(r"белгород", query, re.I):   # сначала только сёла Белгородского района: одноимённые сёла из других районов не мешают
-        res = [x for x in nominatim(query + ", Белгородский район", qs, vb=LOCAL_VB) if x["kind"] == "settlement"]
-    loc = []
-    if not res:
-        loc = nominatim(query, qs, vb=LOCAL_VB)
-        if any(x["kind"] == "settlement" for x in loc): res = loc
+    """Собираем варианты: сёла Белгородского района, всё что нашлось рядом с Белгородом (в том числе внутри города) и города из всей области; выбирает resolve()."""
+    res, seen = [], set()
+    key = lambda x: (round(x["lat"], 3), round(x["lon"], 3))
+    def add(items):
+        for x in items:
+            if key(x) not in seen: seen.add(key(x)); res.append(x)
+    if not re.search(r"белгород", query, re.I):
+        add([x for x in nominatim(query + ", Белгородский район", qs, vb=LOCAL_VB) if x["kind"] == "settlement"])
+    loc = nominatim(query, qs, vb=LOCAL_VB)
+    add([x for x in loc if x["kind"] == "settlement"])
     if not any(x.get("nt") in ("town", "city") for x in res):   # рядом города нет: смотрим, нет ли города с таким названием дальше (Алексеевка, Новый Оскол…)
         wide = nominatim(query, qs)
-        seen = {(round(x["lat"], 3), round(x["lon"], 3)) for x in res}
-        res = res + [x for x in wide if x.get("nt") in ("town", "city") and (round(x["lat"], 3), round(x["lon"], 3)) not in seen]
+        add([x for x in wide if x.get("nt") in ("town", "city")])
         if not res: res = wide or loc
     return res
 
@@ -314,7 +315,7 @@ def merge_forms(pl, geo):
     return out
 
 def near_bonus(km):
-    return 0.6 if km <= 20 else 0.25 if km <= 40 else 0
+    return 0.6 + (20 - km) * 0.02 if km <= 20 else 0.25 if km <= 40 else 0   # чем ближе к Белгороду (до 20 км), тем лучше
 
 def prefer_towns(c):
     """Город с тем же названием, что и село, важнее, если села поблизости от Белгорода (до 25 км) нет: так Волоконовка = город, а не маленькое село."""
