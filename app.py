@@ -273,7 +273,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones):
     return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone, "feed": feed[::-1][:40], "status": status_out(),
             "updated": datetime.now(MSK).strftime("%H:%M:%S")}
 
-WX = {"t": 0, "ok": 0, "data": None}
+WX = {"t": 0, "ok": 0, "data": None, "err": None}
 WMO = {0: ("☀️", "Ясно"), 1: ("🌤", "Малооблачно"), 2: ("⛅", "Облачно"), 3: ("☁️", "Пасмурно"), 45: ("🌫", "Туман"), 48: ("🌫", "Туман"),
        51: ("🌦", "Морось"), 53: ("🌦", "Морось"), 55: ("🌦", "Морось"), 56: ("🌧", "Ледяная морось"), 57: ("🌧", "Ледяная морось"),
        61: ("🌧", "Дождь"), 63: ("🌧", "Дождь"), 65: ("🌧", "Сильный дождь"), 66: ("🌧", "Ледяной дождь"), 67: ("🌧", "Ледяной дождь"),
@@ -287,14 +287,17 @@ def weather():
     if now - WX["t"] > 900:
         WX["t"] = now - 840
         try:
-            c = requests.get("https://api.open-meteo.com/v1/forecast", headers={"User-Agent": UA}, timeout=6,
+            resp = requests.get("https://api.open-meteo.com/v1/forecast", headers={"User-Agent": UA}, timeout=6,
                 params={"latitude": CENTER["lat"], "longitude": CENTER["lon"], "current": "temperature_2m,weather_code,is_day",
-                        "timezone": "Europe/Moscow"}).json()["current"]
+                        "timezone": "Europe/Moscow"})
+            resp.raise_for_status()
+            c = resp.json()["current"]
             icon, label = WMO.get(int(c["weather_code"]), ("🌡", "Погода"))
             if not c.get("is_day", 1) and icon in ("☀️", "🌤"): icon = "🌙"
-            WX.update(t=now, ok=now, data={"temp": round(c["temperature_2m"]), "icon": icon, "label": label})
+            WX.update(t=now, ok=now, err=None, data={"temp": round(c["temperature_2m"]), "icon": icon, "label": label})
         except Exception as e:
-            print("weather error:", e)
+            WX["err"] = f"{type(e).__name__}: {e}"[:200]
+            print("weather error:", WX["err"])
     return WX["data"] if WX["data"] and now - WX["ok"] < 3 * 3600 else None   # старше 3 часов не показываем
 
 @app.route("/api/markers")
@@ -305,6 +308,7 @@ def markers():
             state["last_fetch"] = time.time()
         out = build(list(state["posts"].values()))
     out["weather"] = weather()
+    if out["weather"] is None: out["weather_err"] = WX["err"]   # причина, если погоды нет (видно в /api/markers)
     return jsonify(out)
 
 @app.route("/manifest.webmanifest")
