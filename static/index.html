@@ -203,7 +203,7 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
   ms.forEach(m=>{const fr=m.age<15,PAL={a:{alarm:'#e00000',danger:'#ffc400'},p:{alarm:'#a020f0',danger:'#c9a0ff'}},
       col=PAL[m.pt?'p':'a'][m.level||'alarm'],fp=fr?(m.pt?'zPoint':'zFill'):(m.pt?'zPointOld':'zFillOld'),lv=m.level==='danger'?'опасность':'тревога';
     const pop=`<b>${esc(m.place)}</b> (${lv})<br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
-    if(m.kind==='route'){const o={lineCap:'round',lineJoin:'round',opacity:1};
+    if(m.kind==='route'&&!m.poly){const o={lineCap:'round',lineJoin:'round',opacity:1};
       const a=L.polyline(m.pts,{...o,color:col,weight:10,pane:'zMargin',interactive:false}).addTo(layer);a._m=m.w_out;
       const b=L.polyline(m.pts,{...o,color:col,weight:8,pane:fp}).bindPopup(pop).addTo(layer);b._m=m.w_in;
       routeLayers.push(a,b);return}
