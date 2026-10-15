@@ -237,7 +237,7 @@ function testMode(key){
   $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
       if(!r.ok){$('ts').textContent='нет доступа (проверьте пароль в адресе)';return}
-      D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')+(D.markers.some(m=>m.alts)?'. Варианты: '+D.markers.filter(m=>m.alts).map(m=>m.place+' → '+m.alts.map(a=>(a.chosen?'★':'')+a.km+' км от центра, '+(a.nt||'?')+', важность '+a.imp).join(' | ')+(m.dropped?' (отброшено других объектов: '+m.dropped+')':'')).join('; '):'')+(D.markers.some(m=>m.why)?'. Кругом, потому что: '+D.markers.filter(m=>m.why).map(m=>m.place+' — '+m.why).join('; '):'')}
+      D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')+(D.markers.some(m=>m.alts)?'. Варианты: '+D.markers.filter(m=>m.alts).map(m=>m.place+' → '+m.alts.map(a=>(a.chosen?'★':'')+a.km+' км от центра, '+(a.nt||'?')+', важность '+a.imp).join(' | ')+(m.drop&&m.drop.length?' (отброшено: '+m.drop.map(d=>(d.nt||'?')+' '+d.km+' км').join(', ')+')':'')).join('; '):'')+(D.markers.some(m=>m.why)?'. Кругом, потому что: '+D.markers.filter(m=>m.why).map(m=>m.place+' — '+m.why).join('; '):'')}
     catch(e){$('ts').textContent='ошибка'}}}
 
 // тема (Авто / Ночь / День) и окно «О проекте»
