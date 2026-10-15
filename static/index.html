@@ -56,7 +56,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 @supports (-webkit-touch-callout:none){#bar{padding-top:28px;height:98px}}
 .wx{background:#fff;border-radius:16px;padding:5px 11px;font-size:14px;line-height:1.3;box-shadow:0 1px 4px #0006;white-space:nowrap;pointer-events:none}
 .dark .wx{background:#1f2430;color:#e8e8e8}
-.leaflet-left .wx{margin-left:18px}
+.leaflet-right .wx{margin-right:14px;margin-bottom:6px}
 </style></head>
 <body><div id="bar">Загрузка…</div>
 <div id="wrap"><div id="map"></div><div id="tint"></div><div id="pwa"></div>
@@ -90,8 +90,8 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© Op
 const layer=L.layerGroup().addTo(map);
 let first=true,D=null,userPos=null,userMarker=null,onlyFresh=false,query='';
 const $=id=>document.getElementById(id),panel=$('panel');
-// погода в Белгороде (плашка слева внизу)
-const wxc=L.control({position:'bottomleft'});
+// погода в Белгороде (плашка справа внизу, над подписью карты)
+const wxc=L.control({position:'bottomright'});
 wxc.onAdd=()=>{const c=L.DomUtil.create('div','wx');c.style.display='none';return c};wxc.addTo(map);
 function showWeather(w){const el=wxc.getContainer();if(!w){el.style.display='none';return}
   el.style.display='block';el.title='Погода в Белгороде';
