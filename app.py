@@ -8,7 +8,7 @@ CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "BelgorodDRONE,lpr1_Belgoro
 TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько минут зона БПЛА гаснет сама
 ROCKET_TTL = int(os.getenv("ROCKET_TTL", "120"))     # то же для ракетной опасности
 REGION = os.getenv("REGION", "Белгородская область")
-VIEWBOX = os.getenv("VIEWBOX", "34.9,51.5,38.5,49.8")
+VIEWBOX = os.getenv("VIEWBOX", "34.9,51.6,39.6,49.8")   # вся область (Алексеевка и Ровеньки лежат восточнее 38,5)
 LOCAL_VB = os.getenv("LOCAL_VIEWBOX", "36.0,51.0,37.2,50.2")   # окрестности Белгорода (около 45 км): одноимённые сёла ищем сначала здесь
 UA = "uav-map/1.0 (personal project)"
 MSK = timezone(timedelta(hours=3))  # московское время
@@ -156,6 +156,7 @@ def _shape(r, q):
 def shape(r, q):
     d = _shape(r, q)
     d["nt"] = r.get("type", "")   # тип объекта в OpenStreetMap (для подсказок в режиме проверки)
+    d["dn"] = ", ".join(r.get("display_name", "").split(", ")[:3])   # как место называется в карте
     return d
 
 def normalize(q):
@@ -345,9 +346,9 @@ def resolve(places, cands=candidates):
         pick.update(dict(zip(amb, best[1])))
     for pl in list(pick):   # какие варианты названия были и какой выбран (видно в режиме проверки)
         c, ch = cl[pl], pick[pl]
-        if len(c) > 1 or len(raw[pl]) > len(c):
+        if True:
             pick[pl] = {**ch, "drop": [{"nt": x.get("nt"), "km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "kind": x.get("kind")} for x in raw[pl] if x not in c][:5], "alts": [
-                {"km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "nt": x.get("nt"), "imp": round(x["imp"], 2), "chosen": x is ch} for x in c[:8]]}
+                {"km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "nt": x.get("nt"), "dn": x.get("dn"), "imp": round(x["imp"], 2), "chosen": x is ch} for x in c[:8]]}
     return pick
 
 def rocket_zones():
