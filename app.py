@@ -9,6 +9,7 @@ TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько
 ROCKET_TTL = int(os.getenv("ROCKET_TTL", "120"))     # то же для ракетной опасности
 REGION = os.getenv("REGION", "Белгородская область")
 VIEWBOX = os.getenv("VIEWBOX", "34.9,51.5,38.5,49.8")
+LOCAL_VB = os.getenv("LOCAL_VIEWBOX", "36.0,51.0,37.2,50.2")   # окрестности Белгорода (около 45 км): одноимённые сёла ищем сначала здесь
 UA = "uav-map/1.0 (personal project)"
 MSK = timezone(timedelta(hours=3))  # московское время
 app = Flask(__name__, static_folder="static")
@@ -149,6 +150,10 @@ def split_district(q):
             return " ".join(w[:i]), " ".join(w[i:])
     return None
 
+def near_search(query, qs):
+    """Сначала ищем рядом с Белгородом (где чаще всего тревоги), если там нет, то по всей области."""
+    return nominatim(query, qs, vb=LOCAL_VB) or nominatim(query, qs)
+
 def district_variants(nq):
     """«Губкинский район» -> перебор: район, городской округ, муниципальный округ."""
     m = re.fullmatch(r"\s*(\S+?(?:ск|цк)(?:ий|ая|ое))\s+(?:городской\s+)?(?:муниципальный\s+)?(?:район|округ)\s*", nq, re.I)
@@ -156,9 +161,9 @@ def district_variants(nq):
     b = m.group(1)
     return [f"{b} район", f"{b} городской округ", f"{b} муниципальный округ", f"{b} округ"]
 
-def nominatim(query, q_for_shape, limit=10):
+def nominatim(query, q_for_shape, limit=10, vb=None):
     r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
-        params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": VIEWBOX, "bounded": 1,
+        params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": vb or VIEWBOX, "bounded": 1,
                 "polygon_geojson": 1, "polygon_threshold": 0.003 if re.search(r"район|округ", q_for_shape.lower()) else 0.001}).json()
     time.sleep(1.1)
     name = lambda x: x.get("display_name", "").split(",")[0].strip().lower()
@@ -208,7 +213,7 @@ def candidates(q):
         sd = split_district(nq)
         res = []
         if sd:   # «Архангельское Губкинского ГО»: сначала ищем само село, из одинаковых берём ближайшее к названному округу
-            res = nominatim(sd[0], sd[0])
+            res = near_search(sd[0], sd[0])
             hint = nominatim(sd[1], sd[1], 1)
             if res and hint:
                 res = [min(res, key=lambda x: dkm(x, (hint[0]["lat"], hint[0]["lon"])))]
@@ -217,7 +222,7 @@ def candidates(q):
                 res = nominatim(v, v)
                 if res: break
         if not res:
-            res = nominatim(nq, q)
+            res = near_search(nq, q)
     except Exception:
         return []
     geocache[low] = res
@@ -235,6 +240,8 @@ def only_settlements(c):
 
 def merge_forms(pl, geo):
     """Варианты места по всем формам названия («Никольского» и «Никольское»), без повторов."""
+    m = manual_pos(pl)
+    if m: return [m]   # нарисованный вручную контур важнее поиска
     seen, out = set(), []
     for f in name_forms(pl):
         for c in geo(f):
@@ -435,12 +442,35 @@ def as_poly(pos, g):
     size = max((max(ys) - min(ys)) * 111, (max(xs) - min(xs)) * 111 * math.cos(math.radians(pos["lat"])))
     return {**pos, "poly": g, "r_in": None, "r_out": size * 500 + 700}
 
+CASE = [("ского", "ское"), ("ском", "ское"), ("ском", "ский"), ("ого", "ое"), ("ому", "ое"), ("ым", "ое"), ("ым", "ый"), ("им", "ий"), ("ом", "ое"), ("ом", "ый"),
+        ("ой", "ая"), ("ой", "а"), ("ую", "ая"), ("ова", "ово"), ("ева", "ево"), ("ина", "ино"), ("ки", "ка"), ("ке", "ка"), ("ку", "ка"), ("кой", "ка"),
+        ("ни", "нь"), ("ги", "га"), ("ге", "га"), ("ы", "а"), ("е", "а"), ("у", "а"), ("а", "")]
+
+def case_forms(ph):
+    """Все вероятные начальные формы названия по падежным окончаниям («Новой Нелидовке» -> «Новая Нелидовка»); для сверки с нарисованными контурами."""
+    opts = []
+    for w in ph.split():
+        o = [w] + [w[:-len(a)] + b for a, b in CASE if w.lower().endswith(a) and len(w) > len(a) + 2]
+        opts.append(list(dict.fromkeys(o))[:6])
+    return [" ".join(c) for c in itertools.product(*opts[:3])]
+
+def manual_pos(name):
+    """Село из outlines.json (нарисованное вручную) по названию в любом падеже; даёт готовое место с контуром."""
+    forms = [f.lower() for f in case_forms(name) + case_forms(TYPEWORD.sub("", name))]
+    for k, g in outlines.items():
+        if any(re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", f) for f in forms):
+            g = norm_geo(g)
+            rings = [g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]
+            pts = [p for r in rings for p in r]
+            return as_poly({"lat": sum(p[1] for p in pts) / len(pts), "lon": sum(p[0] for p in pts) / len(pts), "kind": "settlement",
+                            "r_in": 1000, "r_out": 1500, "imp": 1}, g)
+    return None
+
 def with_outline(pos, name=""):
     """Село рисуем по контуру: сначала нарисованный вручную (outlines.json), потом застройка из OpenStreetMap; иначе остаётся круг (с пометкой, почему)."""
     if pos.get("kind") != "settlement" or pos.get("poly") or pos.get("imp") == 1: return pos
-    low = name.lower()
-    for k, g in outlines.items():
-        if k in low: return as_poly(pos, norm_geo(g))
+    m = manual_pos(name)
+    if m: return m
     key = f"__ov_{pos['lat']:.3f}_{pos['lon']:.3f}"
     why = ""
     if key not in geocache:
