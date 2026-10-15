@@ -210,8 +210,6 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
     if(m.kind==='district'){   // район: бледная заливка и тонкий контур
       shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin'}).bindPopup(pop).addTo(layer);
       shape(m,{color:col,weight:1,fill:false,pane:'zLine',interactive:false}).addTo(layer);return}
-    if(!m.poly)L.circle([m.lat,m.lon],{radius:m.r_out,stroke:false,fillColor:col,fillOpacity:1,pane:'zMargin',interactive:false}).addTo(layer);   // возможная зона риска (+1 км)
-    if(!m.poly)L.circle([m.lat,m.lon],{radius:m.r_out,color:col,weight:1,dashArray:'5',fill:false,opacity:.7,pane:'zLine',interactive:false}).addTo(layer);
     shape(m,{stroke:false,fillColor:col,fillOpacity:1,pane:fp}).bindPopup(pop).addTo(layer);
     shape(m,{color:col,weight:m.n>1?4:2,fill:false,pane:'zLine',interactive:false}).addTo(layer)});
   if(first&&layer.getLayers().length){map.fitBounds(L.featureGroup(layer.getLayers()).getBounds().pad(.3));first=false}
@@ -239,7 +237,7 @@ function testMode(key){
   $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
       if(!r.ok){$('ts').textContent='нет доступа (проверьте пароль в адресе)';return}
-      D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')+(D.markers.some(m=>m.why)?'. Кругом, потому что: '+D.markers.filter(m=>m.why).map(m=>m.place+' — '+m.why).join('; '):'')}
+      D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')+(D.markers.some(m=>m.alts)?'. Варианты: '+D.markers.filter(m=>m.alts).map(m=>m.place+' → '+m.alts.map(a=>(a.chosen?'★':'')+a.km+' км от центра, '+(a.nt||'?')+', важность '+a.imp).join(' | ')+(m.dropped?' (отброшено других объектов: '+m.dropped+')':'')).join('; '):'')+(D.markers.some(m=>m.why)?'. Кругом, потому что: '+D.markers.filter(m=>m.why).map(m=>m.place+' — '+m.why).join('; '):'')}
     catch(e){$('ts').textContent='ошибка'}}}
 
 // тема (Авто / Ночь / День) и окно «О проекте»
