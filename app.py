@@ -114,6 +114,8 @@ SETTLE = {"village", "hamlet", "town", "isolated_dwelling", "locality", "farm", 
 DISTRICT = {"suburb", "quarter", "neighbourhood", "city", "administrative", "residential"}
 CITYLIKE = SETTLE | {"city", "suburb", "quarter", "neighbourhood"}
 
+PLACE = SETTLE | {"city", "suburb", "quarter", "neighbourhood", "residential"}
+
 def _shape(r, q):
     lat, lon = float(r["lat"]), float(r["lon"])
     bb = [float(x) for x in r.get("boundingbox", [lat, lat, lon, lon])]  # юг, север, запад, восток
@@ -124,13 +126,12 @@ def _shape(r, q):
         if poly and size <= 150:
             return {"lat": lat, "lon": lon, "kind": "district", "poly": poly, "r_in": None, "r_out": 0}
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
-    if t in SETTLE or t == "city" or (t in ("suburb", "quarter", "neighbourhood", "residential") and poly and size <= 15):
-        if poly and size <= 60:   # город, посёлок, село: по своей границе
+    if t in PLACE or (t == "administrative" and size <= 12 and poly):   # город, посёлок, село, микрорайон: всегда одного вида (по границе или кругом)
+        if poly and size <= 60:
             return {"lat": lat, "lon": lon, "kind": "settlement", "poly": poly, "r_in": None, "r_out": size * 500 + 1000}
-        if size <= 12:
-            r_in = min(3000, max(1000, size * 500))
-            return {"lat": lat, "lon": lon, "kind": "settlement", "r_in": r_in, "r_out": round(r_in * 1.5)}
-    if t in DISTRICT or size > 12:
+        r_in = min(3000, max(1000, size * 500)) if size <= 12 else 3000
+        return {"lat": lat, "lon": lon, "kind": "settlement", "r_in": r_in, "r_out": round(r_in * 1.5)}
+    if t == "administrative" or size > 12:   # крупное административное образование: бледная заливка
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
     return {"lat": lat, "lon": lon, "kind": "object", "r_in": 800, "r_out": 1200}
 
@@ -280,7 +281,7 @@ def resolve(places, cands=candidates):
     for pl in list(pick):   # какие варианты названия были и какой выбран (видно в режиме проверки)
         c, ch = cl[pl], pick[pl]
         if len(c) > 1 or len(raw[pl]) > len(c):
-            pick[pl] = {**ch, "dropped": len(raw[pl]) - len(c), "alts": [
+            pick[pl] = {**ch, "drop": [{"nt": x.get("nt"), "km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "kind": x.get("kind")} for x in raw[pl] if x not in c][:5], "alts": [
                 {"km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "nt": x.get("nt"), "imp": round(x["imp"], 2), "chosen": x is ch} for x in c[:8]]}
     return pick
 
