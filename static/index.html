@@ -232,7 +232,7 @@ function testMode(key){
   document.title='Проверка разбора';
   const b=document.createElement('div');
   b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px';
-  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea><button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <span id="ts"></span>';
+  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea><button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <a href="/api/geocache" style="margin:0 8px;font-size:12px">Скачать найденные места</a><span id="ts"></span>';
   document.body.appendChild(b);
   $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
