@@ -1,4 +1,4 @@
-import os, re, json, time, math, threading
+import os, re, json, time, math, threading, itertools
 from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
@@ -20,7 +20,7 @@ geocache = {k: v for k, v in (json.load(open("geocache_seed.json")) if os.path.e
 if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 
-STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте"
+STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
          r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*")
 NEIGH = r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)|област"
@@ -142,7 +142,7 @@ def split_district(q):
             return " ".join(w[:i]), " ".join(w[i:])
     return None
 
-def nominatim(query, q_for_shape, limit=5):
+def nominatim(query, q_for_shape, limit=10):
     r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
         params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": VIEWBOX, "bounded": 1,
                 "polygon_geojson": 1, "polygon_threshold": 0.003 if "район" in q_for_shape.lower() else 0.0005}).json()
@@ -182,17 +182,37 @@ def candidates(q):
 def dkm(a, b):
     return math.hypot((a["lat"] - b[0]) * 111, (a["lon"] - b[1]) * 111 * math.cos(math.radians(b[0])))
 
+def only_settlements(c):
+    """Если среди вариантов есть настоящее село, улицы и прочее с таким же названием отбрасываем (кроме заданных нами вручную)."""
+    if any(x["kind"] == "settlement" for x in c) and not any(x.get("imp") == 1 for x in c):
+        return [x for x in c if x["kind"] == "settlement"]
+    return c
+
+def merge_forms(pl, geo):
+    """Варианты места по всем формам названия («Никольского» и «Никольское»), без повторов."""
+    seen, out = set(), []
+    for f in name_forms(pl):
+        for c in geo(f):
+            k = (round(c["lat"], 3), round(c["lon"], 3))
+            if k not in seen: seen.add(k); out.append(c)
+    return out
+
 def resolve(places, cands=candidates):
-    """Выбирает место для каждого названия; одинаковые названия (Алексеевка) уточняем по соседним местам в сообщении."""
-    cl = {pl: cands(pl) for pl in places}
-    pick = {pl: max(c, key=lambda x: x["imp"]) for pl, c in cl.items() if c}
-    for _ in range(2):
-        for pl, c in cl.items():
-            others = [p for k, p in pick.items() if k != pl]
-            if len(c) > 1 and others:
-                cen = (sum(p["lat"] for p in others) / len(others), sum(p["lon"] for p in others) / len(others))
-                if dkm(pick[pl], cen) > 25:   # лучший по важности далеко от остальных: берём ближайший к ним
-                    pick[pl] = min(c, key=lambda x: dkm(x, cen))
+    """Выбирает место для каждого названия. Из одинаковых сёл чуть предпочитается то, что ближе к Белгороду. Если названий несколько («Никольское» и «Дубовое»), а одинаковых сёл в области много,
+    берётся набор, где места ближе всего друг к другу (то есть то Никольское, что рядом с Дубовым)."""
+    cl = {pl: only_settlements(cands(pl)) for pl in places}
+    cl = {pl: sorted(c, key=lambda x: -x["imp"])[:10] for pl, c in cl.items() if c}
+    pick = {pl: c[0] for pl, c in cl.items()}
+    amb = [pl for pl, c in cl.items() if len(c) > 1][:4]
+    if amb:
+        fixed = [pick[pl] for pl in cl if pl not in amb]
+        best = None
+        for combo in itertools.product(*[cl[pl] for pl in amb]):
+            pts = fixed + list(combo)
+            cost = (sum(dkm(a, (b["lat"], b["lon"])) for k, a in enumerate(pts) for b in pts[k + 1:]) - 2 * sum(x["imp"] for x in combo)
+                    + 0.03 * sum(dkm(x, (CENTER["lat"], CENTER["lon"])) for x in combo))   # чем ближе к Белгороду, тем чуть лучше
+            if best is None or cost < best[0]: best = (cost, combo)
+        pick.update(dict(zip(amb, best[1])))
     return pick
 
 def rocket_zones():
@@ -244,7 +264,7 @@ def fix_names(t):
     t = re.sub(r"\b[Дд]убовск\w*\s+пол\w*", "Парк Дуба", t)   # «Дубовское поле» (в любом падеже) = Парк Дуба
     return re.sub(r"\b([Сс]евр)я(ков\w*)", r"\1ю\2", t)    # «Севрякова» -> «Севрюкова»
 
-RT_STOP = r"всем|никому|остановить|остановите|стоп|можно|не пользоваться|находим|находите|займите|над|подлет\w*|летит|уничтожен|опасн\w*|движение"
+RT_STOP = r"всем|никому|остановить|остановите|стоп|можно|не пользоваться|находим|находите|займите|над|подлет\w*|летит|уничтожен|опасн\w*|движение|покиньте|покидайте|идет|идёт|массов\w*|пролет\w*|пролёт\w*|уходите|укрыти\w*"
 ROUTE = re.compile(r"\bот\s+(?P<a>[^,.!:;\n]+?)\s+(?:до|в\s+сторону|к)\s+(?P<b>[^.!:;\n]+?)(?=\s*,?\s*(?:также|" + RT_STOP + r")\b|[.!:;\n]|$)", re.I)
 
 def extract_routes(text):
@@ -321,12 +341,12 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         elif kind == "alert":
             if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
                 oblast_drone = {"time": hhmm}   # тревога по всей области: плашка и оранжевая рамка, без заливки
-            rc = lambda pl: next((c for f in name_forms(pl) for c in [geo(f)] if c), [])
+            rc = lambda pl: merge_forms(pl, geo)
             for a, bs in routes:   # «от X до Y»: полоса вдоль трассы (прямая линия между селами, через все названные)
                 names = [a] + bs; label = " — ".join(names)
                 pk0 = resolve(names, rc)
                 pts = [[pk0[n]["lat"], pk0[n]["lon"]] for n in names if n in pk0]
-                if len(pts) >= 2 and route_len(pts) <= 80:
+                if len(pts) >= 2 and route_len(pts) <= 50:
                     w = 3000 if route_len(pts) <= 20 else 6000
                     zr = {"kind": "route", "pts": pts, "w_in": w, "w_out": w + 2000, "r_in": None, "r_out": 0, "place": label,
                           "lat": sum(x[0] for x in pts) / len(pts), "lon": sum(x[1] for x in pts) / len(pts)}
@@ -334,7 +354,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 elif len(pts) == 1:
                     n1 = next(n for n in names if n in pk0); put(pk0[n1], n1, p, hhmm); fpos = fpos or pk0[n1]
                 else:
-                    unknown.append({"place": label, "time": hhmm})
+                    unknown.append({"place": label + (" (участок слишком длинный, вероятно выбрано не то село)" if len(pts) >= 2 else ""), "time": hhmm})
                 if pts:
                     for n in names:
                         if n not in pk0: unknown.append({"place": n, "time": hhmm})   # какое-то из названий не нашлось
