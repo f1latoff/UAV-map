@@ -15,22 +15,22 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
-GEO = "geocache3.json"
-geocache = {k: v for k, v in (json.load(open("geocache_seed.json")) if os.path.exists("geocache_seed.json") else {}).items() if v}
+GEO = "geocache4.json"
+geocache = {k: v for k, v in (json.load(open("geocache_seed2.json")) if os.path.exists("geocache_seed2.json") else {}).items() if v}
 if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
 manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*")
 NEIGH = r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
-    (re.compile(r"(?<!\d)26\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I), 50.542511, 36.479119, 2000),   # М-2, подъезд к Белгороду, 26-й км
-    (re.compile(r"\bбабочк\w*", re.I), 50.568621, 36.460408, 1000),                                    # развязка «Бабочка» (М-2, 674-й км)
-    (re.compile(r"^\W*развязк\w*\W*$", re.I), 50.521067, 36.704759, 1000),                              # просто «развязка» (маршрут «от развязки до …», у Разумного)
-    (re.compile(r"\bаэропорт\w*", re.I), 50.6439, 36.5900, 2000),                                         # аэропорт Белгорода (примерно)
-    (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 1000),                           # кольцо «Я люблю Белгород»
+    (re.compile(r"(?<!\d)26\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I), 50.542511, 36.479119, 1500),   # М-2, подъезд к Белгороду, 26-й км
+    (re.compile(r"\bбабочк\w*", re.I), 50.568621, 36.460408, 500),                                    # развязка «Бабочка» (М-2, 674-й км)
+    (re.compile(r"^\W*развязк\w*\W*$", re.I), 50.521067, 36.704759, 500),                              # просто «развязка» (маршрут «от развязки до …», у Разумного)
+    (re.compile(r"\bаэропорт\w*", re.I), 50.6439, 36.5900, 1500),                                         # аэропорт Белгорода (примерно)
+    (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 400),                           # кольцо «Я люблю Белгород»
 ]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
 BEL = re.compile(r"^белгород(а|е|у)?$|белгородск\w* район")
@@ -108,6 +108,7 @@ def stems(s): return {w[:5] for w in re.findall(r"\w+", s.lower().replace("ё", 
 
 SETTLE = {"village", "hamlet", "town", "isolated_dwelling", "locality", "farm", "allotments"}
 DISTRICT = {"suburb", "quarter", "neighbourhood", "city", "administrative", "residential"}
+CITYLIKE = SETTLE | {"city", "suburb", "quarter", "neighbourhood"}
 
 def shape(r, q):
     lat, lon = float(r["lat"]), float(r["lon"])
@@ -115,25 +116,27 @@ def shape(r, q):
     size = max((bb[1] - bb[0]) * 111, (bb[3] - bb[2]) * 111 * math.cos(math.radians(lat)))  # км
     t, gj = r.get("type", ""), r.get("geojson") or {}
     poly = gj if gj.get("type") in ("Polygon", "MultiPolygon") else None
-    if "район" in q.lower():   # район целиком: настоящий контур (бледная заливка), а если контура нет, круг
+    if re.search(r"район|округ", q.lower()):   # район или округ целиком: бледная заливка по границе
         if poly and size <= 150:
             return {"lat": lat, "lon": lon, "kind": "district", "poly": poly, "r_in": None, "r_out": 0}
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
-    if t in SETTLE and size <= 12:   # село/посёлок: своя территория
-        if poly:
+    if t in SETTLE or t == "city" or (t in ("suburb", "quarter", "neighbourhood") and poly and size <= 15):
+        if poly and size <= 60:   # город, посёлок, село: по своей границе
             return {"lat": lat, "lon": lon, "kind": "settlement", "poly": poly, "r_in": None, "r_out": size * 500 + 1000}
-        r_in = min(3000, max(1000, size * 500))
-        return {"lat": lat, "lon": lon, "kind": "settlement", "r_in": r_in, "r_out": r_in + 1000}
+        if size <= 12:
+            r_in = min(3000, max(1000, size * 500))
+            return {"lat": lat, "lon": lon, "kind": "settlement", "r_in": r_in, "r_out": round(r_in * 1.5)}
     if t in DISTRICT or size > 12:
         return {"lat": lat, "lon": lon, "kind": "district", "r_in": 2000, "r_out": 3000}
-    return {"lat": lat, "lon": lon, "kind": "object", "r_in": 1500, "r_out": 2500}
+    return {"lat": lat, "lon": lon, "kind": "object", "r_in": 800, "r_out": 1200}
 
 def normalize(q):
     """«Губкинского ГО» -> «Губкинский городской округ», чтобы поиск по карте понимал название."""
     q = re.sub(r"\bго\b", "городской округ", q, flags=re.I)
     q = re.sub(r"городского округа", "городской округ", q, flags=re.I)
     q = re.sub(r"муниципального округа", "муниципальный округ", q, flags=re.I)
-    q = re.sub(r"\bрайона\b", "район", q, flags=re.I)
+    q = re.sub(r"\bрайон(?:а|ы|ов|е|у)\b", "район", q, flags=re.I)
+    q = re.sub(r"\bокруг(?:а|и|ов|е|у|ом)\b", "округ", q, flags=re.I)
     return re.sub(r"(\w+(?:ск|цк))ого\b", r"\1ий", q, flags=re.I)
 
 def split_district(q):
@@ -143,12 +146,26 @@ def split_district(q):
             return " ".join(w[:i]), " ".join(w[i:])
     return None
 
+def district_variants(nq):
+    """«Губкинский район» -> перебор: район, городской округ, муниципальный округ."""
+    m = re.fullmatch(r"\s*(\S+?(?:ск|цк)(?:ий|ая|ое))\s+(?:городской\s+)?(?:муниципальный\s+)?(?:район|округ)\s*", nq, re.I)
+    if not m: return None
+    b = m.group(1)
+    return [f"{b} район", f"{b} городской округ", f"{b} муниципальный округ", f"{b} округ"]
+
 def nominatim(query, q_for_shape, limit=10):
     r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
         params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": VIEWBOX, "bounded": 1,
-                "polygon_geojson": 1, "polygon_threshold": 0.003 if "район" in q_for_shape.lower() else 0.0005}).json()
+                "polygon_geojson": 1, "polygon_threshold": 0.003 if re.search(r"район|округ", q_for_shape.lower()) else 0.001}).json()
     time.sleep(1.1)
-    return [{**shape(x, q_for_shape), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)} for x in r]
+    name = lambda x: x.get("display_name", "").split(",")[0].strip().lower()
+    polys = {name(x): x["geojson"] for x in r if (x.get("geojson") or {}).get("type") in ("Polygon", "MultiPolygon")}
+    out = []
+    for x in r:
+        if (x.get("geojson") or {}).get("type") not in ("Polygon", "MultiPolygon") and x.get("type") in CITYLIKE and name(x) in polys:
+            x = {**x, "geojson": polys[name(x)]}   # у города/села граница лежит в соседнем результате с тем же названием
+        out.append({**shape(x, q_for_shape), "imp": float(x.get("importance", 0.3)) + (0.2 if x.get("type") in ("city", "town") else 0)})
+    return out
 
 CITY = (50.5958, 36.5873)   # центр Белгорода (Соборная площадь)
 
@@ -157,7 +174,7 @@ def city_part(q):
     low = q.lower().replace("ё", "е")
     if not re.search(r"(?:города|белгород\w*)", low) or re.search(r"белгородск\w*\s+(?:район|област)", low): return None
     if re.search(r"центр\w*", low):
-        lat, lon, rad = CITY[0], CITY[1], 2000
+        lat, lon, rad = CITY[0], CITY[1], 1000
     else:
         ns = 1 if "север" in low else -1 if re.search(r"\bюг|южн|юго", low) else 0
         ew = 1 if re.search(r"восток|восточ", low) else -1 if re.search(r"запад", low) else 0
@@ -165,20 +182,20 @@ def city_part(q):
         k = 0.707 if ns and ew else 1            # по диагонали смещение по каждой оси меньше
         lat = CITY[0] + ns * k * 3.5 / 111
         lon = CITY[1] + ew * k * 3.5 / (111 * math.cos(math.radians(CITY[0])))
-        rad = 2500
-    return {"lat": lat, "lon": lon, "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}
+        rad = 2000
+    return {"lat": lat, "lon": lon, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}
 
 def candidates(q):
     """Список вариантов места (до 5), лучший по важности первым."""
     low = q.lower()
     for k, v in manual.items():   # places.json: [широта, долгота] или [широта, долгота, радиус_в_метрах]
         if k in low:
-            rad = v[2] if len(v) > 2 else 1500
-            return [{"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
+            rad = v[2] if len(v) > 2 else 800
+            return [{"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}]
     cp = city_part(q)
     if cp: return [cp]
     for rx, la, lo, rad in ALIASES:
-        if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": rad + 1000, "imp": 1}]
+        if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}]
     if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
     if low in geocache:
         c = geocache[low]
@@ -192,6 +209,10 @@ def candidates(q):
             hint = nominatim(sd[1], sd[1], 1)
             if res and hint:
                 res = [min(res, key=lambda x: dkm(x, (hint[0]["lat"], hint[0]["lon"])))]
+        if not res:
+            for v in (district_variants(nq) or []):   # «Губкинский район» на карте это городской округ
+                res = nominatim(v, v)
+                if res: break
         if not res:
             res = nominatim(nq, q)
     except Exception:
@@ -332,6 +353,14 @@ def name_forms(ph):
 def route_len(pts):
     return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
 
+STRONG = re.compile(r"тревог|летит|летят|подлета|движется|движутся|над\s+вам|над\s+город|ударн|в\s+ваш\w*\s+(?:сторону|направлении)|займите|fpv|уничтожен", re.I)
+DANGER = re.compile(r"опасност\w*\s+по\s+(?:бпла|дрон\w*|беспилот\w*)|угроз\w*\s+(?:бпла|дрон)|возможе?н\w*|вероятност", re.I)
+
+def level_of(text):
+    """alarm = БПЛА зафиксирован («Внимание» тоже сюда), danger = только опасность (возможен пролёт, высокая вероятность)."""
+    if STRONG.search(text): return "alarm"
+    return "danger" if DANGER.search(text) else "alarm"
+
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
 def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone):
@@ -340,10 +369,14 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
     feed = []
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
-    def put(pos, name, p, hhmm):
+    def put(pos, name, p, hhmm, lvl):
         k = zkey(pos); z = drone.get(k)
-        if z: z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
-        else: drone[k] = {**pos, "place": name, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm}
+        if z:
+            z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
+            if lvl == "alarm": z["level"] = "alarm"   # опасность усиливается до тревоги, обратно не понижается
+        else:
+            drone[k] = {**pos, "place": name, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm,
+                        "level": lvl, "pt": pos.get("kind") == "object"}
     for p in sorted(posts, key=lambda p: p["ts"]):
         txt = fix_names(p["text"])
         kind = classify(txt)
@@ -377,8 +410,9 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 ss = set().union(*[stems(x) for x in cl])
                 drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
         elif kind == "alert":
+            lvl = level_of(txt)
             if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
-                oblast_drone = {"time": hhmm}   # тревога по всей области: плашка и оранжевая рамка, без заливки
+                oblast_drone = {"time": hhmm, "level": lvl}   # тревога по всей области: плашка и оранжевая рамка, без заливки
             rc = lambda pl: merge_forms(pl, geo)
             for phr in loose:   # «трасса Никольское Таврово»: два названия подряд = участок; а «Новая Деревня» = одно название
                 if merge_forms(phr, geo): places.append(phr)
@@ -391,9 +425,9 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                     w = 3000 if route_len(pts) <= 20 else 6000
                     zr = {"kind": "route", "pts": pts, "w_in": w, "w_out": w + 2000, "r_in": None, "r_out": 0, "place": label,
                           "lat": sum(x[0] for x in pts) / len(pts), "lon": sum(x[1] for x in pts) / len(pts)}
-                    put(zr, label, p, hhmm); fpos = fpos or zr
+                    put(zr, label, p, hhmm, lvl); fpos = fpos or zr
                 elif len(pts) == 1:
-                    n1 = next(n for n in names if n in pk0); put(pk0[n1], n1, p, hhmm); fpos = fpos or pk0[n1]
+                    n1 = next(n for n in names if n in pk0); put(pk0[n1], n1, p, hhmm, lvl); fpos = fpos or pk0[n1]
                 else:
                     unknown.append({"place": label + (" (участок слишком длинный, вероятно выбрано не то село)" if len(pts) >= 2 else ""), "time": hhmm})
                 if pts:
@@ -406,10 +440,8 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                     if KM.search(pl) and any(pk.get(x) for x in places): continue   # километр уточняет найденное место рядом
                     unknown.append({"place": pl, "time": hhmm}); continue
                 fpos = fpos or pos
-                z = drone.get(zkey(pos))
-                if z: z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
-                else: drone[zkey(pos)] = {**pos, "place": pl, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm}
-        feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "text": p["text"][:220],
+                put(pos, pl, p, hhmm, lvl)
+        feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "level": level_of(txt) if kind == "alert" else None, "text": p["text"][:220],
                      "lat": fpos["lat"] if fpos else None, "lon": fpos["lon"] if fpos else None})
     marks = [{**{k: v for k, v in z.items() if k not in ("sources", "last")},
               "age": round((now - z["last"]) / 60), "n": len(z["sources"])} for z in drone.values()]
@@ -483,7 +515,7 @@ def api_test():
 @app.route("/api/geocache")
 def geocache_dump():   # скачать найденные места, чтобы положить в репозиторий как geocache_seed.json
     body = json.dumps({k: v for k, v in geocache.items() if v}, ensure_ascii=False)
-    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=geocache_seed.json"})
+    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=geocache_seed2.json"})
 
 @app.route("/")
 def index(): return send_from_directory("static", "index.html")
