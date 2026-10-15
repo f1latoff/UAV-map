@@ -86,7 +86,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm=s=>String(s).toLowerCase().replace(/ё/g,'е');
 const map=L.map('map').setView([50.6,36.6],9);
-map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');   // подпись библиотеки без значка флага
+map.attributionControl.setPrefix('Leaflet');   // подпись библиотеки простым текстом, без ссылки
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
 const layer=L.layerGroup().addTo(map);
 let first=true,D=null,userPos=null,userMarker=null,onlyFresh=false,query='';
