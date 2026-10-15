@@ -95,7 +95,7 @@ def extract_places(text):
     out = []
     for p in re.split(r"[\n,;:.!]|\bтакже\b|\bи\b", head, flags=re.I):
         p = re.sub(r"\s+", " ", re.sub(NOISE, " ", p, flags=re.I)).strip(" \"'«»-")
-        p = re.sub(r"^(?:в\s+)?район[ае]?\s+|^(?:рядом\s+с|около|возле|вблизи|недалеко\s+от)\s+", "", p, flags=re.I).strip()
+        p = re.sub(r"^(?:в\s+)?район[ае]?\s+|^(?:рядом\s+с|около|возле|вблизи|недалеко\s+от|над|на)\s+", "", p, flags=re.I).strip()
         if p.lower() in ("район", "района", "районе"): continue
         if len(p) > 2 and not re.search(NEIGH, p, re.I):
             if "районы" in text.lower() and "район" not in p.lower() and re.search(r"(ий|ый|ой)$", p):
@@ -216,8 +216,31 @@ def rocket_zones():
         return polys
     return None   # тогда на сайте рисуется запасной круг 25 км вокруг Белгорода
 
+OZ_FAIL = {"t": 0}
+
+def oblast_zone():
+    """Граница всей области (сильно упрощённая) для лёгкой заливки при тревоге на всю область. Берётся один раз и запоминается."""
+    if geocache.get("__oblast__"): return geocache["__oblast__"]
+    if time.time() - OZ_FAIL["t"] < 300: return None   # после неудачи не долбим сервис, пробуем снова через 5 минут
+    try:
+        r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
+            params={"q": REGION, "format": "json", "limit": 3, "countrycodes": "ru", "featuretype": "state",
+                    "polygon_geojson": 1, "polygon_threshold": 0.01}).json()
+        time.sleep(1.1)
+        for x in r:
+            g = x.get("geojson") or {}
+            if g.get("type") in ("Polygon", "MultiPolygon"):
+                geocache["__oblast__"] = g
+                json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+                return g
+    except Exception as e:
+        print("oblast zone error:", e)
+    OZ_FAIL["t"] = time.time()
+    return None
+
 def fix_names(t):
     t = re.sub(r"\b([Уу])син(к\w*)", r"\1стин\2", t)        # опечатка «Усинки» -> «Устинки»
+    t = re.sub(r"\b[Дд]убовск\w*\s+пол\w*", "Парк Дуба", t)   # «Дубовское поле» (в любом падеже) = Парк Дуба
     return re.sub(r"\b([Сс]евр)я(ков\w*)", r"\1ю\2", t)    # «Севрякова» -> «Севрюкова»
 
 RT_STOP = r"всем|никому|остановить|остановите|стоп|можно|не пользоваться|находим|находите|займите|над|подлет\w*|летит|уничтожен|опасн\w*|движение"
@@ -252,7 +275,7 @@ def route_len(pts):
 
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
-def build(posts, now=None, geo=candidates, zones=rocket_zones):
+def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone):
     now = now or time.time()
     drone, unknown, oblast_drone = {}, [], None
     feed = []
@@ -332,7 +355,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones):
     if rk["city"] or rk["oblast"] or rk["places"]:
         rocket = {**rk["last"], "city": rk["city"], "oblast": rk["oblast"], "places": list(rk["places"].values()),
                   "zones": zones() if rk["city"] else None}
-    return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone, "feed": feed[::-1][:40], "status": status_out(),
+    return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone, "oblast_poly": ozone() if (rk["oblast"] or oblast_drone) else None, "feed": feed[::-1][:40], "status": status_out(),
             "updated": datetime.now(MSK).strftime("%H:%M:%S")}
 
 WX = {"t": 0, "ok": 0, "data": None, "err": None}
