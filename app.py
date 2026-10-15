@@ -16,11 +16,28 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
+def load_json(path, default):
+    """Читает файл JSON; если файла нет или он повреждён, сайт не падает, а работает без него."""
+    try:
+        return json.load(open(path)) if os.path.exists(path) else default
+    except Exception as e:
+        print("не удалось прочитать", path, e)
+        return default
+
+def save_cache():
+    """Записывает память целиком через временный файл: обрыв записи не портит старый файл."""
+    try:
+        tmp = GEO + ".tmp"
+        with open(tmp, "w") as f: json.dump(dict(geocache), f, ensure_ascii=False)
+        os.replace(tmp, GEO)
+    except Exception as e:
+        print("не удалось сохранить память:", e)
+
 GEO = "geocache5.json"
-geocache = {k: v for k, v in (json.load(open("geocache_seed3.json")) if os.path.exists("geocache_seed3.json") else {}).items() if v}
-if os.path.exists(GEO): geocache.update(json.load(open(GEO)))
-manual = json.load(open("places.json")) if os.path.exists("places.json") else {}
-outlines = json.load(open("outlines.json")) if os.path.exists("outlines.json") else {}   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
+geocache = {k: v for k, v in load_json("geocache_seed3.json", {}).items() if v}
+geocache.update(load_json(GEO, {}))
+manual = load_json("places.json", {})
+outlines = load_json("outlines.json", {})   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
@@ -180,6 +197,7 @@ def district_variants(nq):
     b = m.group(1)
     return [f"{b} район", f"{b} городской округ", f"{b} муниципальный округ", f"{b} округ"]
 
+NOM_LOCK = threading.Lock()
 KEEP = ("lat", "lon", "type", "class", "display_name", "boundingbox", "importance")
 
 def slim(x):
@@ -193,12 +211,15 @@ def nominatim(query, q_for_shape, limit=10, vb=None):
     key = f"nr|{vb or ''}|{limit}|{thr}|{query.lower()}"
     r = geocache.get(key)
     if r is None:   # сырой ответ карты запоминается (и попадает в файл «найденные места»)
-        r = [slim(x) for x in requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
-            params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": vb or VIEWBOX, "bounded": 1,
-                    "polygon_geojson": 1, "polygon_threshold": thr}).json()]
-        time.sleep(1.1)
-        geocache[key] = r
-        json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+        with NOM_LOCK:   # один запрос за раз и не чаще раза в секунду, даже если одновременно идёт прогрев
+            r = geocache.get(key)
+            if r is None:
+                r = [slim(x) for x in requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
+                    params={"q": f"{query}, {REGION}", "format": "json", "limit": limit, "viewbox": vb or VIEWBOX, "bounded": 1,
+                            "polygon_geojson": 1, "polygon_threshold": thr}).json()]
+                time.sleep(1.1)
+                geocache[key] = r
+                save_cache()
     name = lambda x: x.get("display_name", "").split(",")[0].strip().lower()
     isp = lambda x: (x.get("geojson") or {}).get("type") in ("Polygon", "MultiPolygon")
     def bsz(x):   # размер объекта по его рамке, км
@@ -346,7 +367,7 @@ def rocket_zones():
                 polys.append(g); break
     if polys:
         geocache["__rocket__"] = polys
-        json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+        save_cache()
         return polys
     return None   # тогда на сайте рисуется запасной круг 25 км вокруг Белгорода
 
@@ -365,7 +386,7 @@ def oblast_zone():
             g = x.get("geojson") or {}
             if g.get("type") in ("Polygon", "MultiPolygon"):
                 geocache["__oblast__"] = g
-                json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+                save_cache()
                 return g
     except Exception as e:
         print("oblast zone error:", e)
@@ -574,7 +595,7 @@ def with_outline(pos, name=""):
         g, why = overpass_outline(pos["lat"], pos["lon"])
         if g is None and not why.startswith("в карте нет"): return {**pos, "why": why}   # сбой: «нет контура» не запоминаем
         geocache[key] = g or ""
-        json.dump(geocache, open(GEO, "w"), ensure_ascii=False)
+        save_cache()
     g = geocache.get(key)
     if not g: return {**pos, "why": why or "в карте нет нарисованной застройки рядом с селом (запомнено)"}
     return as_poly(pos, g)
@@ -730,6 +751,44 @@ def api_test():
     with lock: out = build(posts)
     out["weather"] = None; out["status"] = []
     return jsonify(out)
+
+WARM_NAMES = [
+    "Дубовое", "Таврово", "Никольское", "Новая Нелидовка", "Старая Нелидовка", "Майский", "Новая Деревня", "Шагаровка", "Репное", "Красное", "Долбино", "Веселая Лопань",
+    "Октябрьский", "Красный Октябрь", "Устинка", "Нижний Ольшанец", "Разумное", "Крутой Лог", "Маслова Пристань", "Беловское", "Крейда", "Соломино", "Кошлаково", "Чураево",
+    "Купино", "Протопоповка", "Головино", "Хутор Майский", "Нечаевка", "Пуляевка", "Ясные Зори", "Черемошное", "Северный", "Зелёная Поляна", "Мясоедово", "Севрюково",
+    "Ближняя Игуменка", "Стрелецкое", "Болховец", "Пушкарное", "Драгунское", "Комсомольский", "Томаровка", "Строитель", "Борисовка", "Ракитное", "Бессоновка", "Орловка",
+    "Белгород", "Шебекино", "Грайворон", "Валуйки", "Старый Оскол", "Губкин", "Короча", "Волоконовка", "Новый Оскол", "Алексеевка", "Бирюч", "Вейделевка", "Ивня",
+    "Прохоровка", "Красногвардейское", "Ровеньки", "Чернянка", "Яковлево", "Красное", "Харьковская гора", "Савино", "Новосадовый", "Ольшанка", "Бершаково", "Дмитриевка",
+    "Губкинский район", "Старооскольский район", "Шебекинский район", "Грайворонский район", "Борисовский район", "Корочанский район", "Волоконовский район", "Валуйский район",
+    "Белгородский район", "Яковлевский район", "Ракитянский район", "Красногвардейский район", "Новооскольский район", "Ивнянский район", "Прохоровский район",
+    "Чернянский район", "Вейделевский район", "Алексеевский район", "Красненский район", "Ровеньский район", "Краснояружский район"]
+WARM = {"running": False, "done": 0, "total": 0, "bad": [], "t0": 0}
+
+def _warm():
+    WARM.update(running=True, done=0, total=len(WARM_NAMES), bad=[], t0=time.time())
+    for n in WARM_NAMES:
+        try:
+            if not candidates(n): WARM["bad"].append(n)
+        except Exception:
+            WARM["bad"].append(n)
+        WARM["done"] += 1
+    WARM["running"] = False
+
+@app.route("/api/warm")
+def api_warm():
+    """Прогрев памяти: ищет на карте все названия из списка в фоне и запоминает. Открой ссылку один раз и жди."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    if not WARM["running"] and request.args.get("status") != "1":
+        threading.Thread(target=_warm, daemon=True).start(); time.sleep(0.3)
+    w = WARM
+    done = (not w["running"]) and w["total"] and w["done"] >= w["total"]
+    mins = round((time.time() - w["t0"]) / 60, 1) if w["t0"] else 0
+    body = (f"<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>" + ("" if done else "<meta http-equiv='refresh' content='8'>") +
+            f"<body style='font-family:sans-serif;padding:16px;line-height:1.5'><h3>Прогрев памяти</h3>"
+            f"<p>{'Готово' if done else 'Идёт'}: {w['done']} из {w['total'] or len(WARM_NAMES)} названий, прошло {mins} мин.</p>"
+            + ("<p><b>Теперь нажми: <a href='/api/geocache'>скачать найденные места</a></b> и загрузи файл на GitHub в корень.</p>" if done else "<p>Страница обновляется сама. Закрывать её можно, прогрев идёт на сервере.</p>")
+            + (f"<p>Не нашлось: {', '.join(w['bad'])}</p>" if w["bad"] else "") + "</body>")
+    return Response(body, mimetype="text/html")
 
 @app.route("/api/geocache")
 def geocache_dump():   # скачать найденные места, чтобы положить в репозиторий как geocache_seed.json
