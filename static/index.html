@@ -88,6 +88,7 @@ const norm=s=>String(s).toLowerCase().replace(/ё/g,'е');
 const map=L.map('map').setView([50.6,36.6],9);
 map.attributionControl.setPrefix('Leaflet');   // подпись библиотеки простым текстом, без ссылки
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+const oblastLayer=L.layerGroup().addTo(map);   // заливка всей области лежит под зонами
 const layer=L.layerGroup().addTo(map);
 let routeLayers=[];
 let first=true,D=null,userPos=null,userMarker=null,onlyFresh=false,query='';
@@ -118,7 +119,7 @@ lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
   c.innerHTML='<div class="lh">ⓘ Обозначения</div><div class="lb">'+
   '<span style="color:#e00000">■</span> Красный: свежее оповещение (до 15 мин)<br><span style="color:#ff8800">■</span> Оранжевый: старше 15 мин<br>'+
   '<span style="color:#999">◌</span> Пунктир: возможная зона риска (+1 км)<br>▭ Контур: село или посёлок<br>○ Круг 1,5 км: объект или улица<br>'+
-  '<span style="color:#e99">●</span> Бледная заливка: район<br><b style="color:#e00000">━</b> Полоса: участок трассы («от … до …»)<br><b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
+  '<span style="color:#e99">●</span> Бледная заливка: район<br><b style="color:#e00000">━</b> Полоса: участок трассы («от … до …»)<br><span style="color:#e00000">▨</span> Бледная заливка всей области: красная ракетная опасность, оранжевая с пунктиром тревога БПЛА<br><b>━</b> Толстая рамка: подтверждено несколькими каналами<br>'+
   '<span style="color:#8b0000">■</span> Тёмно-красный: ракетная опасность<br><span style="color:#c00">▢</span> Красная рамка карты: ракетная опасность по всей области<br>'+
   '<span style="color:#f80">▢</span> Оранжевая рамка: тревога БПЛА по всей области<br><span style="color:#1a73e8">●</span> Синяя точка: вы</div>';
   L.DomEvent.disableClickPropagation(c);const b=c.querySelector('.lb');b.style.display=innerWidth<700?'none':'block';
@@ -171,7 +172,10 @@ function renderFeed(){const it=feedItems(),l=$('list');
 // карта
 function updRoutes(){const k=156543.03392*Math.cos(50.6*Math.PI/180)/Math.pow(2,map.getZoom());routeLayers.forEach(l=>l.setStyle({weight:Math.max(5,l._m/k)}))}
 map.on('zoomend',updRoutes);
-function redraw(){if(!D)return;const d=D;layer.clearLayers();routeLayers=[];
+function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLayers();routeLayers=[];
+  if(d.oblast_poly){   // лёгкая заливка по границе области: БПЛА оранжевая с пунктиром, ракетная красная со сплошным контуром
+    if(d.oblast_drone)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#ff8800',weight:3,dashArray:'8 6',fillColor:'#ff8800',fillOpacity:.14}}).addTo(oblastLayer);
+    if(d.rocket&&d.rocket.oblast)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#b00000',weight:3,fillColor:'#d00000',fillOpacity:.18}}).addTo(oblastLayer);}
   const rs={stroke:false,fillColor:'#b00000',fillOpacity:.45};
   const shape=(m,st)=>m.poly?L.geoJSON(m.poly,{style:st}):L.circle([m.lat,m.lon],{...st,radius:m.r_in});
   const R=d.rocket;
