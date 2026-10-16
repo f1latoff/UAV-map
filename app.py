@@ -47,7 +47,7 @@ outlines = load_json("outlines.json", {})   # контуры сёл, нарис�
 
 STOP = r"оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
 NEIGH = r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
@@ -115,6 +115,7 @@ def classify(text):
     nocl = re.search(r"отбо\w*\s+(?:пока\s+)?не\s|не\s+да[её]м\s+отбо|без\s+отбо", low)   # «отбой не даем», «отбоя не будет»: это не отбой
     ob = "отбой" in low and not nocl
     if "ракетн" in low: return "rocket_clear" if (ob or calm) else "rocket"
+    if ob and re.search(r"опасност\w*\s+сохраня|\bно\s+опасност|сохраня\w*\s+опасност", low): return "downgrade"   # красное снимается, остаётся жёлтое
     if ob or calm or re.search(r"небо чисто|можно продолжить|продолжить движение|миновала", low): return "clear"
     if "внимание" in low or re.search(r"дрон|бпла|беспилот|в сторону|стоп движ|остановить движение|остановите движение", low): return "alert"
     return None
@@ -635,7 +636,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60: continue
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
-        routes, rest, loose = extract_routes(txt) if kind in ("alert", "clear") else ([], txt, [])
+        routes, rest, loose = extract_routes(txt) if kind in ("alert", "clear", "downgrade") else ([], txt, [])
         places = extract_places(rest)
         fpos = None
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
@@ -660,6 +661,13 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
             else:
                 ss = set().union(*[stems(x) for x in cl])
                 drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
+        elif kind == "downgrade":   # «Отбой по ранее объявленным тревогам, но опасность сохраняется»: тревога снижается до опасности, зоны остаются
+            cl = places + [e for a, bs in routes for e in [a] + bs] + [w for phr in loose for w in phr.split()]
+            allw = not cl or re.search(r"\bвсем\b|\bвсех\b|\bвсей\b|\bвся\b|\bвсе\b|\bвсё\b|по всем|на всей|ранее", low)
+            ss = set().union(*[stems(x) for x in cl]) if cl else set()
+            for z in drone.values():
+                if allw or (stems(z["place"]) & ss): z["level"] = "danger"; z["last"] = max(z["last"], p["ts"])
+            if allw and oblast_drone: oblast_drone = {**oblast_drone, "level": "danger"}
         elif kind == "alert":
             lvl = level_of(txt)
             if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
@@ -693,7 +701,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                     unknown.append({"place": pl, "time": hhmm}); continue
                 fpos = fpos or pos
                 put(pos, pl, p, hhmm, lvl)
-        feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "level": level_of(txt) if kind == "alert" else None, "text": p["text"][:220],
+        feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "level": level_of(txt) if kind == "alert" else ("danger" if kind == "downgrade" else None), "text": p["text"][:220],
                      "lat": fpos["lat"] if fpos else None, "lon": fpos["lon"] if fpos else None})
     marks = [{**{k: v for k, v in z.items() if k not in ("sources", "last")},
               "age": round((now - z["last"]) / 60), "n": len(z["sources"])} for z in drone.values()]
