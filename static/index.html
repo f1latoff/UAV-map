@@ -63,9 +63,20 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 .lt{font-weight:bold;margin:7px 0 2px}.lt:first-child{margin-top:0}.li{display:flex;align-items:center;gap:7px;margin:2px 0}.li.dim{opacity:.7}
 .sw{display:inline-block;flex:none;width:14px;height:14px;border-radius:3px}.sw.ci{border-radius:50%;border:2px solid #a020f0;background:transparent}
 .sw.sq{border:2px solid #e00000;background:transparent}.sw.bar{height:6px;margin:4px 0;background:#e00000;border-radius:3px}.sw.pale{background:rgba(224,0,0,.18);border:1px solid #e00000}
+#mpp{position:absolute;z-index:1100;background:#fff;display:none;flex-direction:column;box-shadow:0 0 8px #0007;left:0;right:0;bottom:0;height:62%;border-radius:16px 16px 0 0}
+@media(min-width:700px){#mpp{left:auto;width:380px;top:0;height:auto;border-radius:0}}
+#mph{padding:10px 12px 8px;font-size:14px;border-bottom:1px solid #ddd}#mph .mt{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:16px}
+#mph .row2{display:flex;gap:6px}#mph input[type=text]{flex:1;min-width:0;padding:8px;font-size:15px;box-sizing:border-box}
+#mph button{padding:8px 12px;font-size:14px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}
+#mpl{overflow:auto;padding:4px 12px calc(18px + env(safe-area-inset-bottom));font-size:15px;line-height:1.4}
+.mpi{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #eee}.mpi .n{flex:1;min-width:0;cursor:pointer}.mpi .n small{display:block;color:#777;font-size:12px}
+.mpi .st{white-space:nowrap;font-weight:bold}.mpi .x{border:0;background:none;font-size:22px;color:#999;cursor:pointer;padding:2px 8px}
+#toast{position:absolute;z-index:1700;left:50%;transform:translateX(-50%);top:8px;max-width:92%;background:#c00000;color:#fff;font-size:15px;font-weight:bold;padding:10px 14px;border-radius:10px;box-shadow:0 2px 12px #0008;display:none}
+.dark #mpp{background:#1b1f2a;color:#e6e6e6}.dark #mph{border-color:#333b4d}.dark #mph input[type=text]{background:#2a3040;color:#eee;border:1px solid #3a4256}
+.dark #mph button{background:#2a3040;color:#8ab4ff;border-color:#3a4256}.dark .mpi{border-color:#2d3446}.dark .mpi .n small{color:#99a}
 </style></head>
 <body><div id="bar"><div id="bt">Загрузка…</div><button id="rf" type="button" aria-label="Обновить"><span>🔄</span></button></div>
-<div id="wrap"><div id="map"></div><div id="tint"></div><div id="pwa"></div>
+<div id="wrap"><div id="map"></div><div id="tint"></div><div id="toast"></div><div id="pwa"></div>
 <div id="about"><div class="ab"><button class="abx" id="abx" aria-label="Закрыть">×</button>
 <h2>О проекте «БПЛА 31»</h2>
 <p>Неофициальная карта оповещений о БПЛА и ракетной опасности по Белгородской области. Информация собирается автоматически из открытых Telegram-каналов и показывается на карте.</p>
@@ -79,12 +90,16 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 <h3>Источники данных</h3>
 <p>Сообщения из открытых Telegram-каналов, права на них принадлежат авторам каналов. Места определяются по данным OpenStreetMap, карта © участники OpenStreetMap. Погода: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>.</p>
 <h3>Конфиденциальность</h3>
-<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет. Погоду обычно получает наш сервер; если у него не вышло, ваш браузер запрашивает её у сервиса Open-Meteo сам, и тот при этом видит ваш IP-адрес.</p>
+<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет. Список «Моих мест» хранится только на вашем телефоне; на сервер уходит лишь название, которое вы вводите для поиска места. Погоду обычно получает наш сервер; если у него не вышло, ваш браузер запрашивает её у сервиса Open-Meteo сам, и тот при этом видит ваш IP-адрес.</p>
 <h3>Установка как приложения</h3>
 <p>iPhone: в Safari нажмите «Поделиться» → «На экран “Домой”». Android: кнопка «Установить» в браузере.</p>
 <h3>Связь</h3>
 <p>Нашли ошибку или есть вопрос? Telegram: <a href="https://t.me/f1latoffr" target="_blank" rel="noopener">@f1latoffr</a></p>
 <p class="small">Проект предоставляется «как есть», без гарантий.</p></div></div>
+<div id="mpp"><div id="mph"><div class="mt"><b>⭐ Мои места</b><a href="#" id="mpc" style="text-decoration:none">✕ закрыть</a></div>
+<div class="row2"><input type="text" id="mpq" placeholder="Село, город или район" autocomplete="off"><button id="mpa">Добавить</button></div><div id="mpr" class="small"></div>
+<label style="display:block;margin-top:8px"><input type="checkbox" id="mps"> 🔔 Звук и вибрация, когда у моего места становится хуже</label>
+<div style="margin-top:4px"><button id="mpt">Проверить звук</button> <span class="small" id="mpn"></span></div></div><div id="mpl"></div></div>
 <div id="panel"><div id="grip" title="Развернуть / свернуть"></div><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
 <label><input type="checkbox" id="fr"> только свежие (до 15 мин)</label>
 <a href="#" id="pc" style="float:right;text-decoration:none">✕ закрыть</a></div><div id="list"></div></div></div>
@@ -92,7 +107,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm=s=>String(s).toLowerCase().replace(/ё/g,'е');
 const map=L.map('map').setView([50.6,36.6],9);
-map.attributionControl.setPrefix('Leaflet');   // подпись библиотеки простым текстом, без ссылки
+map.attributionControl.setPrefix(false);   // без подписи библиотеки; «© OpenStreetMap» остаётся (обязательна по лицензии данных)
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
 // слои зон: заливка рисуется сплошным цветом, а прозрачность 40% применяется ко всему слою сразу, поэтому где зоны пересекаются, цвет не темнеет
 const mkPane=(n,z,o)=>{const p=map.createPane(n);p.style.zIndex=z;p.style.opacity=o};
@@ -146,9 +161,9 @@ lg.onAdd=()=>{const c=L.DomUtil.create('div','lg');
 // кнопки «Где я» и «Лента»
 const tb=L.control({position:'topright'});
 tb.onAdd=()=>{const c=L.DomUtil.create('div','tb');
-  c.innerHTML='<button id="bme">📍 Где я</button><button id="bfeed">☰ Лента и поиск</button><div class="row"><button id="bth"></button><button id="bab">ℹ️ О проекте</button></div><div id="me"></div>';
+  c.innerHTML='<button id="bme">📍 Где я</button><button id="bfeed">☰ Лента и поиск</button><button id="bmp">⭐ Мои места</button><div class="row"><button id="bth"></button><button id="bab">ℹ️ О проекте</button></div><div id="me"></div>';
   L.DomEvent.disableClickPropagation(c);return c};tb.addTo(map);
-$('bfeed').onclick=()=>{panel.style.display=panel.style.display==='flex'?'none':'flex'};
+$('bfeed').onclick=()=>{const o=panel.style.display==='flex';panel.style.display=o?'none':'flex';if(!o)$('mpp').style.display='none'};
 $('grip').onclick=()=>panel.classList.toggle('big');
 $('pc').onclick=e=>{e.preventDefault();panel.style.display='none'};
 $('fr').onchange=e=>{onlyFresh=e.target.checked;redraw()};
@@ -163,6 +178,16 @@ function dseg(lat,lon,a,b){const k=Math.cos(lat*Math.PI/180),x=(lon-a[1])*k*1113
 function dist(s,lat,lon){if(s.pts){let m=1e12;for(let i=0;i<s.pts.length-1;i++)m=Math.min(m,dseg(lat,lon,s.pts[i],s.pts[i+1]));return Math.max(0,m-s.w_in/2)}if(s.poly){if(inPoly(lon,lat,s.poly))return 0;let m=1e12;polys(s.poly).forEach(p=>p[0].forEach(([x,y])=>{m=Math.min(m,hav(lat,lon,y,x))}));return m}
   return Math.max(0,hav(lat,lon,s.lat,s.lon)-s.r_in)}
 const km=m=>(m/1000).toFixed(1).replace('.',',');
+// затемнение всего, что за границей Белгородской области (граница приходит с сервера один раз)
+map.createPane('mask').style.zIndex=250;
+let maskTries=0;
+async function loadMask(){
+  try{const g=await (await fetch('/api/oblast')).json();
+    if(g&&g.type){const world=[[-85,-180],[-85,180],[85,180],[85,-180]],holes=polys(g).map(p=>p[0].map(([x,y])=>[y,x]));
+      L.polygon([world,...holes],{pane:'mask',stroke:false,fillColor:'#000',fillOpacity:.4,interactive:false}).addTo(map);
+      L.geoJSON(g,{pane:'mask',interactive:false,style:{color:'#000',weight:1,opacity:.45,fill:false}}).addTo(map);return}}catch(e){}
+  if(++maskTries<5)setTimeout(loadMask,60000)}   // граница не пришла: пробуем снова через минуту
+loadMask();
 function renderMe(){const el=$('me');if(!userPos||!D){el.style.display='none';return}
   const[lat,lon]=userPos,R=D.rocket,o=[],inObl=D.oblast_poly?inPoly(lon,lat,D.oblast_poly):true;
   if(R){let dr=1e12;if(R.city)(R.zones?R.zones.map(g=>({poly:g})):[{lat:50.5997,lon:36.5983,r_in:25000}]).forEach(s=>dr=Math.min(dr,dist(s,lat,lon)));
@@ -222,10 +247,10 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
   let top=bad.length?`<b style="color:#ffd54a">⚠ Нет свежих данных: ${bad.map(s=>esc(s.ch)+(s.age===null?'':' ('+s.age+' мин назад)')).join(', ')}. Карта может быть неполной.</b><br>`:'';
   if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${esc(R.time)} (МСК)${ro?': вся Белгородская область':''}.</b> `;
   if(d.oblast_drone)top+=`<b style="color:#ffaa44">${d.oblast_drone.level==='danger'?'Опасность':'Тревога'} по БПЛА на всей территории области (${esc(d.oblast_drone.time)}).</b> `;
-  $('bt').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}${d.fetch_age==null?'':' · каналы проверены '+(d.fetch_age<90?d.fetch_age+' с':Math.round(d.fetch_age/60)+' мин')+' назад'}. `+
+  $('bt').innerHTML=mpBar()+top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}${d.fetch_age==null?'':' · каналы проверены '+(d.fetch_age<90?d.fetch_age+' с':Math.round(d.fetch_age/60)+' мин')+' назад'}. `+
     (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
     '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
-  updRoutes();renderFeed();renderMe();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
+  updRoutes();renderFeed();renderMe();mpRefresh();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
 async function refresh(force){
   try{D=await (await fetch('/api/markers'+(force===true?'?force=1':''))).json();redraw()}
   catch(e){$('bt').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
@@ -238,7 +263,7 @@ function testMode(key){
   document.title='Проверка разбора';
   const b=document.createElement('div');
   b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px';
-  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea><button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <a href="/api/warm?key='+encodeURIComponent(key)+'" target="_blank" style="margin-left:8px;font-size:12px">Прогреть память</a> <a href="/api/geocache" style="margin:0 8px;font-size:12px">Скачать найденные места</a><span id="ts"></span>';
+  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea><button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <a href="/api/warm?key='+encodeURIComponent(key)+'" target="_blank" style="margin-left:8px;font-size:12px">Прогреть память</a> <a href="/api/geocache" style="margin:0 8px;font-size:12px">Скачать найденные места</a> <a href="/api/journal?key='+encodeURIComponent(key)+'" target="_blank" style="font-size:12px">Журнал</a><span id="ts"></span>';
   document.body.appendChild(b);
   $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
@@ -246,6 +271,69 @@ function testMode(key){
       D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')+(D.markers.some(m=>m.alts)?'. Варианты: '+D.markers.filter(m=>m.alts).map(m=>m.place+' → '+m.alts.map(a=>(a.chosen?'★':'')+a.km+' км от центра, '+(a.nt||'?')+', важность '+a.imp+(a.dn?' «'+a.dn+'»':'')).join(' | ')+(m.drop&&m.drop.length?' (отброшено: '+m.drop.map(d=>(d.nt||'?')+' '+d.km+' км').join(', ')+')':'')).join('; '):'')+(D.markers.some(m=>m.why)?'. Кругом, потому что: '+D.markers.filter(m=>m.why).map(m=>m.place+' — '+m.why).join('; '):'')}
     catch(e){$('ts').textContent='ошибка'}}}
 
+// ----- Мои места: состояние выбранных мест, звук и вибрация при ухудшении -----
+const RANK={none:0,danger:1,alarm:2,rocket:3};
+// <MP-PURE>
+function zoneStatus(Dd,lat,lon){   // что сейчас действует в этой точке: уровень БПЛА, ракетная опасность, названия зон
+  let lvl=null,rocket=false;const names=[];
+  const up=(l,n)=>{if(l==='alarm'||(l==='danger'&&lvl!=='alarm'))lvl=l;if(n)names.push(n)};
+  (Dd.markers||[]).forEach(m=>{if(dist(m,lat,lon)===0)up(m.level||'alarm',m.place)});
+  if(Dd.oblast_drone)up(Dd.oblast_drone.level||'alarm','вся область');
+  const R=Dd.rocket;
+  if(R){if(R.oblast)rocket=true;
+    if(R.city)(R.zones?R.zones.map(g=>({poly:g})):[{lat:50.5997,lon:36.5983,r_in:25000}]).forEach(s=>{if(dist(s,lat,lon)===0)rocket=true});
+    (R.places||[]).forEach(s=>{if(dist(s,lat,lon)===0)rocket=true})}
+  return{lvl,rocket,names}}
+// </MP-PURE>
+const ST={none:['🟢','спокойно','#6fdc8c','#2e9e4f'],danger:['🟨','опасность','#ffd54a','#a07800'],alarm:['🟥','тревога','#ff6b6b','#d00000'],rocket:['🔴','ракетная опасность','#ff4d4d','#b00000']};
+let MP=[];try{MP=JSON.parse(localStorage.getItem('mp1')||'[]').filter(x=>x&&isFinite(x.lat)&&isFinite(x.lon))}catch(e){}
+let MPsnd=true;try{MPsnd=localStorage.getItem('mp1snd')!=='0'}catch(e){}
+const mpSave=()=>{try{localStorage.setItem('mp1',JSON.stringify(MP))}catch(e){}};
+function mpStatus(p){const r=zoneStatus(D,p.lat,p.lon),k=r.rocket?'rocket':(r.lvl||'none');return{k,rank:RANK[k],names:r.names}}
+function mpBar(){if(!MP.length||!D)return'';
+  return'<div>⭐ '+MP.map(p=>{const s=ST[mpStatus(p).k];return esc(p.n)+' <b style="color:'+s[2]+'">'+s[0]+' '+s[1]+'</b>'}).join(' · ')+'</div>'}
+let AC=null;
+function unlockAudio(){try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume()}catch(e){}}
+['pointerdown','touchstart','keydown'].forEach(ev=>document.addEventListener(ev,unlockAudio,{passive:true}));
+function beep(kind){if(!AC)return;const P={danger:[[520,.35]],alarm:[[880,.22],[660,.22],[880,.22],[660,.22]],rocket:[[1000,.14],[720,.14],[1000,.14],[720,.14],[1000,.14],[720,.14]]}[kind]||[];
+  let t=AC.currentTime+.02;P.forEach(([f,d])=>{const o=AC.createOscillator(),g=AC.createGain();o.type='square';o.frequency.value=f;
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.25,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d);
+    o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+d+.02);t+=d+.06})}
+function toast(m,k){const t=$('toast');t.textContent=m;t.style.background=k==='danger'?'#b58900':'#c00000';t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.style.display='none'},9000)}
+$('toast').onclick=()=>{$('toast').style.display='none'};
+const mpLast={};
+function mpNotify(){if(TK||!D)return;let worst=null;
+  MP.forEach(p=>{const s=mpStatus(p),id=p.lat+','+p.lon,prev=mpLast[id];
+    if(prev!==undefined&&s.rank>prev&&MPsnd&&(!worst||s.rank>worst.s.rank))worst={p,s};mpLast[id]=s.rank});
+  if(worst){const st=ST[worst.s.k];toast(st[0]+' '+st[1]+': '+worst.p.n,worst.s.k);beep(worst.s.k);
+    if(navigator.vibrate)navigator.vibrate(worst.s.k==='danger'?[250]:[400,150,400,150,800])}}
+const mpp=$('mpp');
+function mpRender(){const el=$('mpl');
+  el.innerHTML=MP.length?MP.map((p,i)=>{const s=ST[D?mpStatus(p).k:'none'];
+    return'<div class="mpi"><div class="n" data-i="'+i+'">'+esc(p.n)+'<small>'+esc(p.s||'')+'</small></div><div class="st" style="color:'+s[3]+'">'+s[0]+' '+s[1]+'</div><button class="x" data-d="'+i+'" aria-label="Убрать">×</button></div>'}).join('')
+    :'<p class="small">Добавьте село, город или район, за которым хотите следить: его состояние будет всегда вверху экрана. Список хранится только на вашем телефоне.</p>';
+  $('mps').checked=MPsnd;
+  el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{MP.splice(+b.dataset.d,1);mpSave();mpRender();if(D)redraw()});
+  el.querySelectorAll('[data-i]').forEach(d=>d.onclick=()=>{const p=MP[+d.dataset.i];map.flyTo([p.lat,p.lon],12)})}
+function mpRefresh(){mpNotify();if(mpp.style.display==='flex')mpRender()}
+function mpAdd(x,q){if(MP.length>=8){$('mpr').textContent='Не больше 8 мест';return}
+  if(MP.some(p=>Math.abs(p.lat-x.lat)<1e-4&&Math.abs(p.lon-x.lon)<1e-4)){$('mpr').textContent='Это место уже в списке';return}
+  const n=q.charAt(0).toUpperCase()+q.slice(1),dn=String(x.dn||''),s=dn.includes(',')?dn.split(',').slice(1,3).join(',').trim():'';
+  MP.push({n,s,lat:x.lat,lon:x.lon});mpSave();$('mpq').value='';$('mpr').textContent='';mpRender();if(D)redraw()}
+async function mpSearch(){const q=$('mpq').value.trim(),r=$('mpr');if(q.length<3){r.textContent='Введите название (от 3 букв)';return}
+  r.textContent='ищу…';
+  try{const res=await fetch('/api/place?q='+encodeURIComponent(q));if(res.status===429){r.textContent='Подождите секунду и повторите';return}
+    const a=await res.json();if(!Array.isArray(a)||!a.length){r.textContent='Не нашёл такое место. Попробуйте написать иначе.';return}
+    if(a.length===1){mpAdd(a[0],q);return}
+    r.innerHTML='Выберите нужное:'+a.map((x,i)=>'<a href="#" data-c="'+i+'" style="display:block;padding:7px 0">'+esc(x.dn)+' <small>('+x.km+' км от центра Белгорода)</small></a>').join('');
+    r.querySelectorAll('[data-c]').forEach(l=>l.onclick=e=>{e.preventDefault();mpAdd(a[+l.dataset.c],q)})}
+  catch(e){r.textContent='Нет связи с сервером'}}
+$('bmp').onclick=()=>{const o=mpp.style.display==='flex';mpp.style.display=o?'none':'flex';if(!o){panel.style.display='none';mpRender()}};
+$('mpc').onclick=e=>{e.preventDefault();mpp.style.display='none'};
+$('mpa').onclick=mpSearch;$('mpq').onkeydown=e=>{if(e.key==='Enter')mpSearch()};
+$('mps').onchange=e=>{MPsnd=e.target.checked;try{localStorage.setItem('mp1snd',MPsnd?'1':'0')}catch(x){}};
+$('mpt').onclick=()=>{unlockAudio();setTimeout(()=>{beep('alarm');if(navigator.vibrate)navigator.vibrate([300,150,300])},60);
+  $('mpn').textContent=navigator.vibrate?'':'На iPhone вибрация в браузере не работает, будет только звук. Звук не играет при выключенном экране или свёрнутом приложении.'};
 // тема (Авто / Ночь / День) и окно «О проекте»
 (function(){
   const mq=matchMedia('(prefers-color-scheme: dark)'),bth=$('bth'),LAB={auto:'🌓 Авто',dark:'🌙 Ночь',light:'☀️ День'};
