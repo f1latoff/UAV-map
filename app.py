@@ -45,9 +45,9 @@ BUILTIN_PLACES = {   # закреплённые вручную названия:
 manual = {**BUILTIN_PLACES, **load_json("places.json", {})}
 outlines = load_json("outlines.json", {})   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
 
-STOP = r"оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
+STOP = r"заметьте|со\s+стороны|никому\s+не|не\s+пользоваться|оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bмного\b|\bднр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|опасност\w*|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
 NEIGH = r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
@@ -108,25 +108,32 @@ def status_out():
         out.append({"ch": ch, "err": st.get("err", True), "age": round((now - st["ok"]) / 60) if st.get("ok") else None})
     return out
 
+TYPEWORDS = {"улица", "ул", "микрорайон", "мкр", "район", "город", "развязка", "кольцо", "аэропорт", "вокзал", "село", "поселок", "посёлок", "деревня", "хутор", "станица", "трасса"}
+REPORT = r"\bвсу\b|поврежд\w*|атаковал\w*|пострада\w*|погиб\w*|ранен\w*|оперштаб|разрушен\w*|возгоран\w*|пожар\w*"
+
 def classify(text):
     low = text.lower()
     if re.search(JUNK, low): return None
     calm = re.search(r"не наблюда|активности нет", low)   # «На данный момент активность не наблюдаем» = спокойно
-    nocl = re.search(r"отбо\w*\s+(?:пока\s+)?не\s|не\s+да[её]м\s+отбо|без\s+отбо", low)   # «отбой не даем», «отбоя не будет»: это не отбой
+    if re.search(REPORT, low) and not re.search(r"летит|летят|подлета|движется|над\s+вам|займите|в\s+ваш|тревог", low): return None   # сводка о последствиях («повреждена кровля»), не оповещение
+    nocl = re.search(r"отбо\w*\s+(?:пока\s+)?не\s|не\s+да[её]м\s+отбо|без\s+отбо|отбо\w*\s+нет", low)   # «отбой не даем», «отбоя не будет»: это не отбой
     ob = "отбой" in low and not nocl
     if "ракетн" in low: return "rocket_clear" if (ob or calm) else "rocket"
-    if ob and re.search(r"опасност\w*\s+сохраня|\bно\s+опасност|сохраня\w*\s+опасност", low): return "downgrade"   # красное снимается, остаётся жёлтое
+    if re.search(r"пуск\w*\s+(?:с\s+)?самол[её]т|пуск\w*\s+ракет", low): return "rocket"   # «Пуски с самолёта противника»
+    if ob and re.search(r"опасност\w*(?:\s+\w+)?\s+сохраня|\bно\s+опасност|сохраня\w*\s+опасност", low): return "downgrade"   # красное снимается, остаётся жёлтое
     if ob or calm or re.search(r"небо чисто|можно продолжить|продолжить движение|миновала", low): return "clear"
     if "внимание" in low or re.search(r"дрон|бпла|беспилот|в сторону|стоп движ|остановить движение|остановите движение", low): return "alert"
     return None
 
 def extract_places(text):
-    """Названия мест: берём первый кусок текста (между служебными фразами вроде «займите укрытие», «всем стоп»), в котором они есть."""
+    """Названия мест: в каждом предложении берём часть до служебной фразы («займите укрытие», «находитесь в укрытии», «над вами…»)."""
     t = re.sub(r"^\s*(внимание|отбой)[,!.:\s]*", "", text, flags=re.I)
-    for chunk in re.split(STOP, t, flags=re.I):
-        out = _places_in(chunk or "", text)
-        if out: return out
-    return []
+    out = []
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", t):
+        out += _places_in(re.split(STOP, sent, maxsplit=1, flags=re.I)[0], text)
+    if out and re.match(r"(?:улица|ул\.)\s", out[0], re.I):   # «улица Корочанская, Волчанская, Студенческая»: все названия улицы
+        out = [out[0]] + ["улица " + x if re.fullmatch(r"[А-ЯЁ][а-яё]+(?:ская|ная|ая|ой|ий)", x) else x for x in out[1:]]
+    return out
 
 def _places_in(head, text):
     out = []
@@ -134,10 +141,12 @@ def _places_in(head, text):
         p = re.sub(r"\s+", " ", re.sub(NOISE, " ", p, flags=re.I)).strip(" \"'«»-")
         p = re.sub(r"\s+", " ", re.sub(r"(?<!\S)(?:а|и|в|во|на|по|к|у|с|со|о|об)(?!\S)", " ", p, flags=re.I)).strip(" \"'«»-")   # одиночные предлоги и союзы («дубовое а»)
         p = re.sub(r"^(?:в\s+)?район[ае]?\s+|^(?:рядом\s+с|около|возле|вблизи|недалеко\s+от|над|на)\s+", "", p, flags=re.I).strip()
-        if p.lower() in ("район", "района", "районе", "районы", "районов"): continue
+        if p.lower() in ("район", "района", "районе"): continue
         mm = re.fullmatch(r"((?:[А-ЯЁа-яё-]+(?:ский|цкий|ской|ный)\s+)+[А-ЯЁа-яё-]+(?:ский|цкий|ской|ный))\s+район(?:ы|ов)", p)
         if mm:   # несколько районов подряд без запятых
             out += [w + " район" for w in mm.group(1).split()]; continue
+        p = re.sub(r"\bрайоны\b|\bрайонов\b", "район", p, flags=re.I)
+        if p.lower() in ("район", "района", "районе"): continue
         if len(p) > 2 and not re.search(NEIGH, p, re.I):
             if "районы" in text.lower() and "район" not in p.lower() and re.search(r"(ий|ый|ой)$", p):
                 p += " район"   # список вида «Яковлевский, Борисовский районы»
@@ -294,6 +303,8 @@ def candidates(q):
         res = []
         if sd:   # «Архангельское Губкинского ГО»: сначала ищем само село, из одинаковых берём ближайшее к названному округу
             res = near_search(sd[0], sd[0])
+            seen = {(round(x["lat"], 3), round(x["lon"], 3)) for x in res}   # село из названного района может лежать далеко от Белгорода: добавляем поиск по всей области
+            res += [x for x in nominatim(sd[0], sd[0]) if x["kind"] == "settlement" and (round(x["lat"], 3), round(x["lon"], 3)) not in seen]
             hint = nominatim(sd[1], sd[1], 1)
             if res and hint:
                 res = [min(res, key=lambda x: dkm(x, (hint[0]["lat"], hint[0]["lon"])))]
@@ -413,10 +424,29 @@ def oblast_zone():
     OZ_FAIL["t"] = time.time()
     return None
 
+CTX_GO = re.compile(r"(?<![А-ЯЁа-яё-])(?!(?:Внимание|Отбой|Тревога|Опасность|Белгород)\b)([А-ЯЁ][а-яё-]{2,}(?: [А-ЯЁ][а-яё-]{2,})?),?[ ]+([А-ЯЁ][а-яё-]+?(?:ского|цкого|ский|цкий))\s+(?:ГО|МО)\b")
+CTX_RAION = re.compile(r"(?<![А-ЯЁа-яё-])(?!(?:Внимание|Отбой|Тревога|Опасность|Белгород)\b)([А-ЯЁ][а-яё-]{2,}(?: [А-ЯЁ][а-яё-]{2,})?)[,\n][ \n]*([А-ЯЁ][а-яё-]+?(?:ского|цкого|ский|цкий))\s+район\b")
+
+def _ctx_sub(m):
+    name, adj = m.group(1), m.group(2)
+    if re.search(r"(ский|цкий|ского|цкого)$", name.split()[-1]): return m.group(0)   # «Губкинский ГО»: это сам округ, а не село в нём
+    return f"{name} {adj[:-3] + 'ий' if adj.endswith('ого') else adj} район"
+
 def fix_names(t):
     t = re.sub(r"\b([Уу])син(к\w*)", r"\1стин\2", t)        # опечатка «Усинки» -> «Устинки»
+    t = re.sub(r"[\u203c\u2049\u2600-\u27bf\ufe0f\u200d\U0001F000-\U0001FAFF]", " ", t)   # значки «‼️», «📍» не часть названий
     t = re.sub(r"\b\d{1,2}[:.]\d{2}\b", " ", t)   # время в тексте («14:39») не часть названия
-    t = re.sub(r"\b([А-Яа-яЁё-]{3,}?)(?:ском|ский|ского)\s+(?:МО|м\.\s?о\.|(?:муниципальн|городск)\w+\s+округ\w*)", r"\1ский район", t)   # «в Яковлевском МО» = Яковлевский район
+    t = re.sub(r"\b[Бб]лижн\w+\s+[Ии]гумен\w+", "Ближняя Игуменка", t); t = re.sub(r"\b[Дд]альн\w+\s+[Ии]гумен\w+", "Дальняя Игуменка", t)
+    t = re.sub(r"\b[Нн]овосадов\w*", "Новосадовый", t)
+    t = re.sub(r"\b[Нн]икольская\b(?!\s+ул)", "Никольское", t)
+    t = re.sub(r"\b[Сс]оломин[аы]?\b", "Соломино", t); t = re.sub(r"\b[Сс]оломенск\w+\s+мост", "Соломинский мост", t)
+    t = re.sub(r"(развязк\w*[\s-]+[Бб]абочк\w*)", r"развязка Бабочка,", t)   # «развязка Бабочка разумное» = два места
+    t = re.sub(r"(?i)\bв\s+направлении\s+(?:[а-яё]+\s+){0,2}област\w+", " ", t)           # «в направлении Курской области»: куда летит, а не где опасно
+    t = re.sub(r"(?i)(?:\bи\s+)?\bдалее\s+(?:на|в\s+направлении)\s+(?:(?:[а-яё]+,?\s+(?:и\s+)?){0,3}област\w*|(?-i:[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?))", " ", t)   # «и далее на Курскую, Воронежскую область», «и далее на Старый Оскол»
+    t = re.sub(r"(?i)\bот\s+[а-яё-]+\s+(?:на|в\s+сторону)\s+(?:север\w*|юг\w*|запад\w*|восток\w*|северо-\w+|юго-\w+)", " ", t)   # «От Харькова на север»: откуда и куда летят, а не место
+    t = re.sub(r"(?i)(бпла)\s+от\s+[^\n.,]+", r"\1", t)                                      # «фиксации БПЛА от Гг», «БПЛА от Новооскольского района»: откуда летит
+    t = CTX_GO.sub(_ctx_sub, t); t = CTX_RAION.sub(_ctx_sub, t)                              # «Архангельское Губкинского ГО» -> «Архангельское Губкинский район»
+    t = re.sub(r"\b([А-Яа-яЁё-]{3,}?)(?:ском|ский|ского)\s+(?:МО|ГО|м\.\s?о\.|(?:муниципальн|городск)\w+\s+округ\w*)", r"\1ский район", t)   # «в Яковлевском МО», «Губкинский ГО» = Яковлевский район
     t = re.sub(r"\b[Хх]ар\s?г[ао]р\w*", "Харьковская гора", t)       # «харгора», «хар гора», «Харгара» = Харьковская гора
     t = re.sub(r"\b[Дд]убовск\w*\s+пол\w*", "Парк Дуба", t)   # «Дубовское поле» (в любом падеже) = Парк Дуба
     return re.sub(r"\b([Сс]евр)я(ков\w*)", r"\1ю\2", t)    # «Севрякова» -> «Севрюкова»
@@ -512,7 +542,7 @@ def buffer_polygon(pts, half_m, steps=8):
 def route_len(pts):
     return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
 
-STRONG = re.compile(r"тревог|летит|летят|подлета|движется|движутся|над\s+вам|над\s+город|в\s+ваш\w*\s+(?:сторону|направлении)|займите|уничтожен|высок\w*\s+активност|\bстоп\s+движ\w*|\bвсем\s+стоп\b|остановит\w*\s+движ\w*|остановить\s+движ\w*|прекратит\w*\s+движ\w*", re.I)
+STRONG = re.compile(r"тревог|летит|летят|подлета|движется|движутся|над\s+вам|над\s+город|в\s+ваш\w*\s+(?:сторону|направлении)|займите|уничтожен|высок\w*\s+активност|\bстоп\W+движ\w*|находи(?:тесь|мся)\s+в\s+укрыт|над\s+(?:трасс|дорог|сел|посел|район)\w*|фиксаци\w*|зафиксирован\w*|\bвсем\s+стоп\b|остановит\w*\s+движ\w*|остановить\s+движ\w*|прекратит\w*\s+движ\w*", re.I)
 
 ALLW = r"по\s+всем|по\s+всей|на\s+всей|вс(?:ем|ех|е|ё)\s+(?:ранее|тревог|зон|участк|направлени)"   # общий отбой: «по всем ранее объявленным», «по всей области», «всех ранее…»; одно «Внимание всем!» не считается
 
@@ -652,6 +682,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
     feed = []
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
+    last_rk = {}   # канал -> когда было последнее ракетное сообщение (для продолжений «В сторону…», «Шебекино»)
     def put(pos, name, p, hhmm, lvl):
         k = zkey(pos); z = drone.get(k)
         if z:
@@ -663,28 +694,37 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
     for p in sorted(posts, key=lambda p: p["ts"]):
         txt = fix_names(p["text"])
         kind = classify(txt)
+        li = last_rk.get(p["ch"])
+        cont = bool(li and p["ts"] - li["ts"] <= 300 and len(p["text"]) <= 60 and (kind is None or (kind == "alert" and re.match(r"\s*в\s+сторону\b", p["text"].lower()))))
+        if cont: kind = "rocket"   # «Пуски с самолёта» / «Ракетная опасность», а следом короткое «В сторону Журавлевки» / «Шебекино»
         if not kind: continue
         if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60: continue
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
         routes, rest, loose = extract_routes(txt) if kind in ("alert", "clear", "downgrade") else ([], txt, [])
         places = extract_places(rest)
+        if cont and not places: continue
         fpos = None
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
-            rk = fresh_rk()
+            rk = fresh_rk(); last_rk.pop(p["ch"], None)
         elif kind == "rocket":
-            rk["last"] = {"time": hhmm, "age": round((now - p["ts"]) / 60), "text": p["text"]}
-            if not places:
-                if re.search(r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)", low) and "белгород" not in low: pass   # про соседний регион
-                elif "област" in low: rk["oblast"] = True
-                else:
-                    rk["city"] = True; fpos = CENTER   # без места: Белгород и Белгородский район
-            pk = resolve([x for x in places if not BEL.search(x.lower())], lambda pl: merge_forms(pl, geo))
-            for pl in places:
-                if BEL.search(pl.lower()): rk["city"] = True; fpos = fpos or CENTER
-                else:
-                    pos = pk.get(pl)
-                    if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
+            if not places and re.search(r"сохраня", low) and re.search(r"ранее\s+объявленн", low): pass   # «по ранее объявленным регионам сохраняется»: ничего нового
+            else:
+                rk["last"] = {"time": hhmm, "age": round((now - p["ts"]) / 60), "text": p["text"]}
+                if cont and li and li.get("default_city"): rk["city"] = False   # место названо следом: это не весь город
+                if not places:
+                    if re.search(r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)", low) and "белгород" not in low: pass   # про соседний регион
+                    elif "област" in low: rk["oblast"] = True
+                    else:
+                        rk["city"] = True; fpos = CENTER   # без места: Белгород и Белгородский район
+                        last_rk[p["ch"]] = {"ts": p["ts"], "default_city": True}
+                else: last_rk[p["ch"]] = {"ts": p["ts"], "default_city": False}
+                pk = resolve([x for x in places if not BEL.search(x.lower())], lambda pl: merge_forms(pl, geo))
+                for pl in places:
+                    if BEL.search(pl.lower()): rk["city"] = True; fpos = fpos or CENTER
+                    else:
+                        pos = pk.get(pl)
+                        if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
         elif kind in ("clear", "downgrade"):
             names = real_names(places + [e for a, bs in routes for e in [a] + bs], [w for phr in loose for w in phr.split()])
             general = not names or re.search(ALLW, low)   # общий: без настоящих названий мест или «по всем…»
@@ -706,12 +746,19 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 for part in parts:
                     for x in extract_places(part): plv.setdefault(x, level_of(part))
                 if plv: places = list(plv)
-            if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
+            lowx = re.sub(r"от\s+белгородск\w+\s+област\w+", " ", low)   # «Воронежская область от Белгородской области»: про соседний регион
+            other_first = re.match(r"\s*(?:воронежск|курск|брянск|орловск|липецк|харьковск|сумск)", low)
+            if re.search(r"всей территории|по всей области", lowx) or (not places and not other_first and re.search(r"белгородск\w* област", lowx)):
                 oblast_drone = {"time": hhmm, "level": lvl}   # тревога по всей области: плашка и оранжевая рамка, без заливки
             rc = lambda pl: merge_forms(pl, geo)
             for phr in loose:   # «трасса Никольское Таврово»: два названия подряд = участок; а «Новая Деревня» = одно название
                 if merge_forms(phr, geo): places.append(phr)
-                else: routes.append((phr.split()[0], phr.split()[1:4]))
+                else:
+                    ws = phr.split(); done = False
+                    for k in range(1, len(ws)):   # «Шебекино Маслова Пристань» = «Шебекино» и «Маслова Пристань»
+                        a, b = " ".join(ws[:k]), " ".join(ws[k:])
+                        if merge_forms(a, geo) and merge_forms(b, geo): routes.append((a, [b])); done = True; break
+                    if not done: routes.append((ws[0], ws[1:4]))
             for a, bs in routes:   # «от X до Y»: полоса вдоль трассы (прямая линия между селами, через все названные)
                 names = [a] + bs; label = " — ".join(names)
                 pk0 = resolve(names, rc)
@@ -729,6 +776,14 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 if pts:
                     for n in names:
                         if n not in pk0: unknown.append({"place": n, "time": hhmm})   # какое-то из названий не нашлось
+            def split_glued(pls):   # два названия подряд без запятой («Разумное Крейда»): если целиком не находится, а по отдельности находятся, это два места
+                res = []
+                for pl in pls:
+                    ws = pl.split()
+                    if len(ws) >= 2 and ws[0].lower() not in TYPEWORDS and not KM.search(pl) and not rc(pl) and all(len(w) > 3 and rc(w) for w in ws): res += ws
+                    else: res.append(pl)
+                return res
+            places = split_glued(places)
             pk = {k: with_outline(v, k) for k, v in resolve(places, rc).items()}
             for pl in places:
                 pos = pk.get(pl)
