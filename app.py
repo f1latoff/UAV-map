@@ -47,7 +47,7 @@ outlines = load_json("outlines.json", {})   # контуры сёл, нарис�
 
 STOP = r"оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
 NEIGH = r"курск|воронеж|липецк|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
@@ -121,8 +121,14 @@ def classify(text):
     return None
 
 def extract_places(text):
+    """Названия мест: берём первый кусок текста (между служебными фразами вроде «займите укрытие», «всем стоп»), в котором они есть."""
     t = re.sub(r"^\s*(внимание|отбой)[,!.:\s]*", "", text, flags=re.I)
-    head = re.split(STOP, t, maxsplit=1, flags=re.I)[0]
+    for chunk in re.split(STOP, t, flags=re.I):
+        out = _places_in(chunk or "", text)
+        if out: return out
+    return []
+
+def _places_in(head, text):
     out = []
     for p in re.split(r"[\n,;:.!]|\bа\s+также\b|\bи\s+также\b|\bтакже\b|\bплюс\b|\bеще\b|\bещё\b|\bи\b", head, flags=re.I):
         p = re.sub(r"\s+", " ", re.sub(NOISE, " ", p, flags=re.I)).strip(" \"'«»-")
@@ -138,7 +144,6 @@ def extract_places(text):
 def stems(s): return {w[:5] for w in re.findall(r"\w+", s.lower().replace("ё", "е")) if len(w) > 3}
 
 SETTLE = {"village", "hamlet", "town", "isolated_dwelling", "locality", "farm", "allotments"}
-DISTRICT = {"suburb", "quarter", "neighbourhood", "city", "administrative", "residential"}
 CITYLIKE = SETTLE | {"city", "suburb", "quarter", "neighbourhood"}
 
 PLACE = SETTLE | {"city", "suburb", "quarter", "neighbourhood", "residential"}
@@ -505,7 +510,8 @@ def route_len(pts):
     return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
 
 STRONG = re.compile(r"тревог|летит|летят|подлета|движется|движутся|над\s+вам|над\s+город|в\s+ваш\w*\s+(?:сторону|направлении)|займите|уничтожен|высок\w*\s+активност|\bстоп\s+движ\w*|\bвсем\s+стоп\b|остановит\w*\s+движ\w*|остановить\s+движ\w*|прекратит\w*\s+движ\w*", re.I)
-DANGER = re.compile(r"опасност\w*\s+по\s+(?:бпла|дрон\w*|беспилот\w*)|угроз\w*\s+(?:бпла|дрон)|опасност\w*|возможе?н\w*|вероятност", re.I)
+
+ALLW = r"по\s+всем|по\s+всей|на\s+всей|вс(?:ем|ех|е|ё)\s+(?:ранее|тревог|зон|участк|направлени)"   # общий отбой: «по всем ранее объявленным», «по всей области», «всех ранее…»; одно «Внимание всем!» не считается
 
 def level_of(text):
     """alarm = БПЛА зафиксирован (летит, над вами, займите укрытие, тревога…), danger = просто «Внимание» или опасность (возможен пролёт, высокая вероятность)."""
@@ -618,6 +624,15 @@ def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone):
     now = now or time.time()
     drone, unknown, oblast_drone = {}, [], None
+    def real_names(cand, loose_words):
+        zs = set().union(*[stems(z["place"]) for z in drone.values()]) if drone else set()
+        out = []
+        for x in cand:
+            if stems(x) & zs: out.append(x); continue
+            try:
+                if merge_forms(x, geo): out.append(x)
+            except Exception: pass
+        return out + [w for w in loose_words if stems(w) & zs]
     feed = []
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
@@ -654,20 +669,19 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 else:
                     pos = pk.get(pl)
                     if pos: rk["places"][zkey(pos)] = {**pos, "place": pl}; fpos = fpos or pos
-        elif kind == "clear":
-            cl = places + [e for a, bs in routes for e in [a] + bs] + [w for phr in loose for w in phr.split()]
-            if not cl or re.search(r"\bвсем\b|\bвсех\b|\bвсей\b|\bвся\b|\bвсе\b|\bвсё\b|по всем|на всей", low):   # общий отбой: без названий мест или «по всем…»
-                drone, unknown, oblast_drone = {}, [], None
-            else:
-                ss = set().union(*[stems(x) for x in cl])
-                drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
-        elif kind == "downgrade":   # «Отбой по ранее объявленным тревогам, но опасность сохраняется»: тревога снижается до опасности, зоны остаются
-            cl = places + [e for a, bs in routes for e in [a] + bs] + [w for phr in loose for w in phr.split()]
-            allw = not cl or re.search(r"\bвсем\b|\bвсех\b|\bвсей\b|\bвся\b|\bвсе\b|\bвсё\b|по всем|на всей|ранее", low)
-            ss = set().union(*[stems(x) for x in cl]) if cl else set()
-            for z in drone.values():
-                if allw or (stems(z["place"]) & ss): z["level"] = "danger"; z["last"] = max(z["last"], p["ts"])
-            if allw and oblast_drone: oblast_drone = {**oblast_drone, "level": "danger"}
+        elif kind in ("clear", "downgrade"):
+            names = real_names(places + [e for a, bs in routes for e in [a] + bs], [w for phr in loose for w in phr.split()])
+            general = not names or re.search(ALLW, low)   # общий: без настоящих названий мест или «по всем…»
+            if kind == "clear":
+                if general: drone, unknown, oblast_drone = {}, [], None
+                else:
+                    ss = set().union(*[stems(x) for x in names])
+                    drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
+            else:   # «Отбой по ранее объявленным тревогам, но опасность сохраняется»: тревога снижается до опасности, зоны остаются
+                ss = set().union(*[stems(x) for x in names]) if names else set()
+                for z in drone.values():
+                    if general or (stems(z["place"]) & ss): z["level"] = "danger"; z["last"] = max(z["last"], p["ts"])
+                if general and oblast_drone: oblast_drone = {**oblast_drone, "level": "danger"}
         elif kind == "alert":
             lvl = level_of(txt)
             if re.search(r"всей территории|по всей области", low) or (not places and re.search(r"белгородск\w* област", low)):
@@ -780,7 +794,7 @@ WARM_NAMES = [
     "Купино", "Протопоповка", "Головино", "Хутор Майский", "Нечаевка", "Пуляевка", "Ясные Зори", "Черемошное", "Северный", "Зелёная Поляна", "Мясоедово", "Севрюково",
     "Ближняя Игуменка", "Стрелецкое", "Болховец", "Пушкарное", "Драгунское", "Комсомольский", "Томаровка", "Строитель", "Борисовка", "Ракитное", "Бессоновка", "Орловка",
     "Белгород", "Шебекино", "Грайворон", "Валуйки", "Старый Оскол", "Губкин", "Короча", "Волоконовка", "Новый Оскол", "Алексеевка", "Бирюч", "Вейделевка", "Ивня",
-    "Прохоровка", "Красногвардейское", "Ровеньки", "Чернянка", "Яковлево", "Красное", "Харьковская гора", "Савино", "Новосадовый", "Ольшанка", "Бершаково", "Дмитриевка",
+    "Прохоровка", "Красногвардейское", "Ровеньки", "Чернянка", "Яковлево", "Харьковская гора", "Савино", "Новосадовый", "Ольшанка", "Бершаково", "Дмитриевка",
     "Губкинский район", "Старооскольский район", "Шебекинский район", "Грайворонский район", "Борисовский район", "Корочанский район", "Волоконовский район", "Валуйский район",
     "Белгородский район", "Яковлевский район", "Ракитянский район", "Красногвардейский район", "Новооскольский район", "Ивнянский район", "Прохоровский район",
     "Чернянский район", "Вейделевский район", "Алексеевский район", "Красненский район", "Ровеньский район", "Краснояружский район"]
