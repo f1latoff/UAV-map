@@ -499,13 +499,12 @@ def buffer_polygon(pts, half_m, steps=8):
 def route_len(pts):
     return sum(math.hypot((a[0] - b[0]) * 111, (a[1] - b[1]) * 111 * math.cos(math.radians(a[0]))) for a, b in zip(pts, pts[1:]))
 
-STRONG = re.compile(r"тревог|летит|летят|подлета|движется|движутся|над\s+вам|над\s+город|в\s+ваш\w*\s+(?:сторону|направлении)|займите|уничтожен", re.I)
+STRONG = re.compile(r"тревог|летит|летят|подлета|движется|движутся|над\s+вам|над\s+город|в\s+ваш\w*\s+(?:сторону|направлении)|займите|уничтожен|высок\w*\s+активност", re.I)
 DANGER = re.compile(r"опасност\w*\s+по\s+(?:бпла|дрон\w*|беспилот\w*)|угроз\w*\s+(?:бпла|дрон)|опасност\w*|возможе?н\w*|вероятност", re.I)
 
 def level_of(text):
-    """alarm = БПЛА зафиксирован («Внимание» тоже сюда), danger = только опасность (возможен пролёт, высокая вероятность)."""
-    if STRONG.search(text): return "alarm"
-    return "danger" if DANGER.search(text) else "alarm"
+    """alarm = БПЛА зафиксирован (летит, над вами, займите укрытие, тревога…), danger = просто «Внимание» или опасность (возможен пролёт, высокая вероятность)."""
+    return "alarm" if STRONG.search(text) else "danger"
 
 OV = {"t": 0, "err": ""}
 OV_URLS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"]
