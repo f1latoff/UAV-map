@@ -44,6 +44,30 @@ BUILTIN_PLACES = {   # закреплённые вручную названия:
     "заячий": [50.4114, 36.869707, 800, "село", "Заячий хутор"],     # квартал Заячий хутор (Шебекино)
     "заячь": [50.4114, 36.869707, 800, "село", "Заячий хутор"],      # то же в других падежах: «Заячьем хуторе», «Заячьего хутора»
 }
+def save_json(path, obj):
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f: json.dump(obj, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception as e:
+        print("не удалось сохранить", path, e)
+
+JFILE = "journal.json"
+JOURNAL = {k: v for k, v in load_json(JFILE, {}).items() if isinstance(v, dict)}   # журнал сообщений, которые сайт не понял (ключ «канал:номер»)
+SUSPECT = re.compile(r"бпла|дрон|беспилот|тревог|опасност|ракет|ударн|атак|взрыв|обстрел|пр[оа]л[её]т", re.I)
+
+def journal_add(issues):
+    """Записывает в журнал новые «непонятые» сообщения (повторно одно и то же не пишется), старше 7 дней стираются."""
+    changed = False
+    for it in issues:
+        old = JOURNAL.get(it["key"])
+        if old and old.get("reason") == it["reason"]: continue
+        JOURNAL[it["key"]] = {**it, "seen": time.time()}; changed = True
+    for k in [k for k, v in JOURNAL.items() if v.get("ts", 0) < time.time() - 7 * 86400]: del JOURNAL[k]; changed = True
+    while len(JOURNAL) > 400:
+        del JOURNAL[min(JOURNAL, key=lambda k: JOURNAL[k].get("ts", 0))]; changed = True
+    if changed: save_json(JFILE, JOURNAL)
+
 manual = {**BUILTIN_PLACES, **load_json("places.json", {})}
 outlines = load_json("outlines.json", {})   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
 
@@ -112,6 +136,12 @@ def status_out():
 
 TYPEWORDS = {"улица", "ул", "микрорайон", "мкр", "район", "город", "развязка", "кольцо", "аэропорт", "вокзал", "село", "поселок", "посёлок", "деревня", "хутор", "станица", "трасса"}
 REPORT = r"в\s+том\s+числе|без\s+пострадавших|жертв\w*|\bвсу\b|поврежд\w*|атаковал\w*|пострада\w*|погиб\w*|ранен\w*|оперштаб|разрушен\w*|возгоран\w*|пожар\w*"
+
+def skip_reason(text):
+    low = text.lower()
+    if re.search(JUNK, low): return "реклама или ссылка"
+    if re.search(REPORT, low): return "сводка о последствиях"
+    return "нет признаков оповещения"
 
 def classify(text):
     low = text.lower()
@@ -699,10 +729,13 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
             except Exception: pass
         return out + [w for w in loose_words if stems(w) & zs]
     feed = []
+    issues = []   # сообщения, которые сайт не понял (для журнала)
+    put_count = [0]
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
     last_rk = {}   # канал -> когда было последнее ракетное сообщение (для продолжений «В сторону…», «Шебекино»)
     def put(pos, name, p, hhmm, lvl):
+        put_count[0] += 1
         k = zkey(pos); z = drone.get(k)
         if z:
             z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
@@ -716,7 +749,9 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         li = last_rk.get(p["ch"])
         cont = bool(li and p["ts"] - li["ts"] <= 300 and len(p["text"]) <= 60 and (kind is None or (kind == "alert" and re.match(r"\s*в\s+сторону\b", p["text"].lower()))))
         if cont: kind = "rocket"   # «Пуски с самолёта» / «Ракетная опасность», а следом короткое «В сторону Журавлевки» / «Шебекино»
-        if not kind: continue
+        if not kind:
+            if SUSPECT.search(p["text"]): issues.append({"key": f'{p["ch"]}:{p["id"]}', "ch": p["ch"], "ts": p["ts"], "text": p["text"][:400], "tag": "пропущено", "reason": skip_reason(txt)})
+            continue
         if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60: continue
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
@@ -724,6 +759,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         places = extract_places(rest)
         if cont and not places: continue
         fpos = None
+        u0, pc0, od0 = len(unknown), put_count[0], oblast_drone
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
             rk = fresh_rk(); last_rk.pop(p["ch"], None)
         elif kind == "rocket":
@@ -812,6 +848,11 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                     unknown.append({"place": pl, "time": hhmm}); continue
                 fpos = fpos or pos
                 put(pos, pl, p, hhmm, plv.get(pl, lvl))
+        if kind == "alert":
+            newu = [u["place"] for u in unknown[u0:]] if len(unknown) >= u0 else []
+            base = {"key": f'{p["ch"]}:{p["id"]}', "ch": p["ch"], "ts": p["ts"], "text": p["text"][:400], "tag": "места"}
+            if newu: issues.append({**base, "reason": "не найдено: " + ", ".join(newu[:6])})
+            elif put_count[0] == pc0 and oblast_drone is od0: issues.append({**base, "reason": "ничего не нарисовано: места не распознаны"})
         feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "level": level_of(txt) if kind == "alert" else ("danger" if kind == "downgrade" else None), "text": p["text"][:220],
                      "lat": fpos["lat"] if fpos else None, "lon": fpos["lon"] if fpos else None})
     marks = [{**{k: v for k, v in z.items() if k not in ("sources", "last")},
@@ -820,7 +861,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
     if rk["city"] or rk["oblast"] or rk["places"]:
         rocket = {**rk["last"], "city": rk["city"], "oblast": rk["oblast"], "places": list(rk["places"].values()),
                   "zones": zones() if rk["city"] else None}
-    return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone, "oblast_poly": ozone() if (rk["oblast"] or oblast_drone) else None, "feed": feed[::-1][:40], "status": status_out(),
+    return {"markers": marks, "unknown": unknown[:8], "rocket": rocket, "oblast_drone": oblast_drone, "oblast_poly": ozone() if (rk["oblast"] or oblast_drone) else None, "feed": feed[::-1][:40], "issues": issues, "status": status_out(),
             "updated": datetime.now(MSK).strftime("%H:%M:%S")}
 
 WX = {"t": 0, "ok": 0, "data": None, "err": None}
@@ -858,6 +899,7 @@ def markers():
             refresh_posts()
             state["last_fetch"] = time.time()
         out = build(list(state["posts"].values()))
+        journal_add(out.pop("issues", []))
         out["fetch_age"] = round(time.time() - state["last_fetch"])   # сколько секунд назад проверены каналы
     out["weather"] = weather()
     if out["weather"] is None: out["weather_err"] = WX["err"]   # причина, если погоды нет (видно в /api/markers)
@@ -882,8 +924,61 @@ def api_test():
     now = time.time()
     posts = [{"ch": "test", "id": i, "text": t, "ts": now - (len(texts) - i) * 20} for i, t in enumerate(texts)]
     with lock: out = build(posts)
+    out.pop("issues", None)
     out["weather"] = None; out["status"] = []
     return jsonify(out)
+
+import html as _html
+
+@app.route("/api/journal")
+def api_journal():
+    """Журнал сообщений, которые сайт не понял: не найденные места, ничего не нарисовано, пропущенные похожие на оповещения. Только с паролем."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    key = request.args.get("key")
+    if request.args.get("clear") == "1": JOURNAL.clear(); save_json(JFILE, JOURNAL)
+    tag = request.args.get("tag")
+    items = sorted((v for v in JOURNAL.values() if not tag or v.get("tag") == tag), key=lambda v: v.get("ts", 0), reverse=True)[:200]
+    if request.args.get("json") == "1": return jsonify(items)
+    q = lambda **kw: "?" + "&".join([f"key={key}"] + [f"{k}={v}" for k, v in kw.items()])
+    cards = "".join(
+        f"<div style='border-left:5px solid {'#f80' if v.get('tag') == 'места' else '#999'};background:#f6f6f6;margin:8px 0;padding:8px 10px;border-radius:4px'>"
+        f"<small>{datetime.fromtimestamp(v.get('ts', 0), MSK).strftime('%d.%m %H:%M')} · {_html.escape(v.get('ch', ''))} · {_html.escape(v.get('tag', ''))}</small><br>"
+        f"<b>{_html.escape(v.get('reason', ''))}</b><br><span style='white-space:pre-wrap'>{_html.escape(v.get('text', ''))}</span></div>" for v in items) or "<p>Пока пусто: всё, что приходило, сайт понял.</p>"
+    body = ("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<body style='font-family:sans-serif;padding:12px;max-width:760px;margin:auto;line-height:1.45'>"
+            f"<h3>Журнал: что сайт не понял</h3><p>Записей: {len(items)}. "
+            f"<a href='{q()}'>все</a> · <a href='{q(tag='места')}'>места</a> · <a href='{q(tag='пропущено')}'>пропущено</a> · <a href='{q(clear=1)}'>очистить</a></p>"
+            "<p><small>«Места»: сообщение признано оповещением, но место не найдено или ничего не нарисовано. «Пропущено»: похоже на оповещение, но сайт его не использовал (реклама, сводка, нет признаков). Хранится 7 дней, при обновлении сайта на Render журнал обнуляется.</small></p>"
+            + cards + "</body>")
+    return Response(body, mimetype="text/html")
+
+@app.route("/api/oblast")
+def api_oblast():
+    """Граница Белгородской области для затемнения соседних регионов; страница берёт её один раз."""
+    g = oblast_zone()
+    r = jsonify(g)
+    r.headers["Cache-Control"] = "public, max-age=86400" if g else "no-cache"
+    return r
+
+PLACE_RATE = {}
+
+@app.route("/api/place")
+def api_place():
+    """Поиск места для «Моих мест» на странице: до 5 вариантов с координатами (ходит в карту не чаще раза в 1,5 секунды с одного адреса)."""
+    q = (request.args.get("q") or "").strip()[:60]
+    if len(q) < 3: return jsonify([])
+    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+    now = time.time()
+    if now - PLACE_RATE.get(ip, 0) < 1.5: return jsonify({"error": "слишком часто"}), 429
+    PLACE_RATE[ip] = now
+    if len(PLACE_RATE) > 500: PLACE_RATE.clear()
+    try:
+        cl = prefer_towns(only_settlements(merge_forms(fix_names(q), candidates)))
+    except Exception:
+        cl = []
+    cl = sorted(cl, key=lambda x: -(x["imp"] + near_bonus(dkm(x, (CENTER["lat"], CENTER["lon"])))))[:5]
+    return jsonify([{"name": q, "dn": x.get("dn") or q, "lat": round(x["lat"], 5), "lon": round(x["lon"], 5),
+                     "km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1), "kind": x.get("kind")} for x in cl])
 
 WARM_NAMES = [
     "Дубовое", "Таврово", "Никольское", "Новая Нелидовка", "Старая Нелидовка", "Майский", "Новая Деревня", "Шагаровка", "Репное", "Красное", "Долбино", "Веселая Лопань",
