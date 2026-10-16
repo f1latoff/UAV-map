@@ -36,7 +36,10 @@ def save_cache():
 GEO = "geocache5.json"
 geocache = {k: v for k, v in load_json("geocache_seed3.json", {}).items() if v}
 geocache.update(load_json(GEO, {}))
-manual = load_json("places.json", {})
+BUILTIN_PLACES = {   # закреплённые вручную названия: часть слова: [широта, долгота, радиус в метрах, "село" (если это село, а не объект)]
+    "титовк": [50.387554, 36.844877, 800, "село"],   # посёлок Титовка у Шебекино
+}
+manual = {**BUILTIN_PLACES, **load_json("places.json", {})}
 outlines = load_json("outlines.json", {})   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
 
 STOP = r"займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
@@ -54,7 +57,7 @@ ALIASES = [   # места, которые каналы называют по-с
     (re.compile(r"^\W*юго-?запад\w*\W*$", re.I), 50.5735, 36.5522, 2000),                              # «Юго-Западный» = юго-западная часть города
     (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 400),                           # кольцо «Я люблю Белгород»
 ]
-JUNK = r"cloudtips|благодарим|донат|подписывайтесь|реклам"
+JUNK = r"cloudtips|благодарим|донат|подписывайтесь|подпишись|реклам|https?://|www\.|t\.me|max\.ru|rustore|приложени\w*|скачай|наши каналы|наш\w* канал|официальн\w+ канал"   # реклама и ссылки: тревогой не считаются
 BEL = re.compile(r"^белгород(а|е|у)?$|белгородск\w* район")
 
 def fetch_posts(ch, before=None):
@@ -264,7 +267,8 @@ def candidates(q):
     for k, v in manual.items():   # places.json: [широта, долгота] или [широта, долгота, радиус_в_метрах]
         if k in low:
             rad = v[2] if len(v) > 2 else 800
-            return [{"lat": v[0], "lon": v[1], "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}]
+            return [{"lat": v[0], "lon": v[1], "kind": "settlement" if len(v) > 3 else "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1,
+                     "nt": "вручную", "dn": k}]
     cp = city_part(q)
     if cp: return [cp]
     for rx, la, lo, rad in ALIASES:
