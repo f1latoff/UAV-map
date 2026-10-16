@@ -18,7 +18,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>html{background:#222}
 body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh}
-#bar{flex:none;height:84px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;overflow:auto}
+#bar{flex:none;height:84px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;display:flex;gap:8px;align-items:flex-start;overflow:hidden}
+#bt{flex:1;min-width:0;height:100%;overflow:auto}
+#rf{flex:none;width:40px;height:40px;border-radius:50%;border:1px solid #666;background:#333;color:#fff;font-size:19px;line-height:1;padding:0;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#rf:disabled{opacity:.6}#rf.spin span{display:inline-block;animation:rfspin .8s linear infinite}@keyframes rfspin{to{transform:rotate(360deg)}}
 #wrap{position:relative;flex:1;min-height:0}#map{height:100%}
 #tint{position:absolute;inset:0;pointer-events:none;z-index:500;display:none}
 .lg,.tb{background:#fff;border-radius:6px;box-shadow:0 1px 4px #0006;font-size:12px;line-height:1.6}.lg{max-width:240px}
@@ -61,7 +64,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 .sw{display:inline-block;flex:none;width:14px;height:14px;border-radius:3px}.sw.ci{border-radius:50%;border:2px solid #a020f0;background:transparent}
 .sw.sq{border:2px solid #e00000;background:transparent}.sw.bar{height:6px;margin:4px 0;background:#e00000;border-radius:3px}.sw.pale{background:rgba(224,0,0,.18);border:1px solid #e00000}
 </style></head>
-<body><div id="bar">Загрузка…</div>
+<body><div id="bar"><div id="bt">Загрузка…</div><button id="rf" type="button" aria-label="Обновить"><span>🔄</span></button></div>
 <div id="wrap"><div id="map"></div><div id="tint"></div><div id="pwa"></div>
 <div id="about"><div class="ab"><button class="abx" id="abx" aria-label="Закрыть">×</button>
 <h2>О проекте «БПЛА 31»</h2>
@@ -219,14 +222,17 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
   let top=bad.length?`<b style="color:#ffd54a">⚠ Нет свежих данных: ${bad.map(s=>esc(s.ch)+(s.age===null?'':' ('+s.age+' мин назад)')).join(', ')}. Карта может быть неполной.</b><br>`:'';
   if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${esc(R.time)} (МСК)${ro?': вся Белгородская область':''}.</b> `;
   if(d.oblast_drone)top+=`<b style="color:#ffaa44">${d.oblast_drone.level==='danger'?'Опасность':'Тревога'} по БПЛА на всей территории области (${esc(d.oblast_drone.time)}).</b> `;
-  $('bar').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}. `+
+  $('bt').innerHTML=top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}${d.fetch_age==null?'':' · каналы проверены '+(d.fetch_age<90?d.fetch_age+' с':Math.round(d.fetch_age/60)+' мин')+' назад'}. `+
     (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
     '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
   updRoutes();renderFeed();renderMe();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
-async function refresh(){
-  try{D=await (await fetch('/api/markers')).json();redraw()}
-  catch(e){$('bar').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
+async function refresh(force){
+  try{D=await (await fetch('/api/markers'+(force===true?'?force=1':''))).json();redraw()}
+  catch(e){$('bt').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
 const TK=new URLSearchParams(location.search).get('test');
+$('rf').onclick=async()=>{const b=$('rf');if(b.disabled||TK)return;   // в режиме проверки кнопка видна (чтобы оценить вид), но ничего не делает
+  b.disabled=true;b.classList.add('spin');const t0=Date.now();   // кнопка 🔄: сервер сразу перечитывает каналы
+  await refresh(true);const w=700-(Date.now()-t0);if(w>0)await new Promise(r=>setTimeout(r,w));b.classList.remove('spin');b.disabled=false};
 if(TK){testMode(TK)}else{refresh();setInterval(refresh,15000)}
 function testMode(key){
   document.title='Проверка разбора';
