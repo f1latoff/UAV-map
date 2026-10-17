@@ -1,4 +1,4 @@
-import os, re, json, time, math, threading, itertools
+import os, re, json, time, math, threading, itertools, hashlib
 from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
@@ -16,6 +16,11 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
+BUILD = "пакет-1"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
+START_TS = time.time()
+PERF = {"build_ms": 0, "calls": 0}
+SEEN = {}   # хеш адреса (только в памяти) -> когда обращался: сколько устройств пользуются сайтом
+SEEN_SALT = os.urandom(8).hex()
 def load_json(path, default):
     """Читает файл JSON; если файла нет или он повреждён, сайт не падает, а работает без него."""
     try:
@@ -35,6 +40,7 @@ def save_cache():
 
 GEO = "geocache5.json"
 geocache = {k: v for k, v in load_json("geocache_seed3.json", {}).items() if v}
+SEED_N = len(geocache)
 geocache.update(load_json(GEO, {}))
 BUILTIN_PLACES = {   # закреплённые вручную названия: часть слова: [широта, долгота, радиус в метрах, "село" (если это село, а не объект), название для поиска границы]
     "титовк": [50.387554, 36.844877, 800, "село", "Титовка"],   # посёлок Титовка у Шебекино
@@ -68,12 +74,28 @@ def journal_add(issues):
         del JOURNAL[min(JOURNAL, key=lambda k: JOURNAL[k].get("ts", 0))]; changed = True
     if changed: save_json(JFILE, JOURNAL)
 
+AFILE = "archive.json"
+ARCHIVE = {k: v for k, v in load_json(AFILE, {}).items() if isinstance(v, dict)}   # архив всех сообщений из каналов и того, как сайт их понял
+ARCH = {"t": 0, "dirty": False}
+
+def archive_add(trace):
+    for c in trace:
+        k = f'{c["ch"]}:{c["id"]}'
+        e = {"ts": c["ts"], "ch": c["ch"], "id": c["id"], "text": c["text"][:600], "kind": c["kind"], "level": c["level"], "skip": c["skip"],
+             "places": c["places"], "unknown": c["unknown"], "drawn": [d["place"] + " — " + d["how"] for d in c["drawn"]], "cleared": c["cleared"], "notes": c["notes"]}
+        if ARCHIVE.get(k) != e: ARCHIVE[k] = e; ARCH["dirty"] = True
+    for k in [k for k, v in ARCHIVE.items() if v.get("ts", 0) < time.time() - 7 * 86400]: del ARCHIVE[k]; ARCH["dirty"] = True
+    while len(ARCHIVE) > 3000:
+        del ARCHIVE[min(ARCHIVE, key=lambda k: ARCHIVE[k].get("ts", 0))]; ARCH["dirty"] = True
+    if ARCH["dirty"] and time.time() - ARCH["t"] > 30:   # на диск не чаще раза в 30 секунд
+        save_json(AFILE, ARCHIVE); ARCH.update(t=time.time(), dirty=False)
+
 manual = {**BUILTIN_PLACES, **load_json("places.json", {})}
 outlines = load_json("outlines.json", {})   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
 
-STOP = r"заметьте|со\s+стороны|никому\s+не|не\s+пользоваться|оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
-NOISE = (r"ракетн\w* опасност\w*|опасност\w* по бпла|тревог\w* по бпла|тревога|опасность|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bспутник\w*|\bтыл\w*|\bдом(?:а|ов|ам|е)?\b|\bбез\b|\bтом\b|\bчисл\w*|\bмного\b|\bднр\b|\bлнр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|опасност\w*|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
+STOP = r"пройти\s+в|заметьте|со\s+стороны|никому\s+не|не\s+пользоваться|оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
+NOISE = (r"ракетн\w* опасност\w*|\bопасност\w* по бпла|тревог\w* по бпла|тревога|\bопасност\w*|пролёт\w*|пролет\w*|бпла|дрон\w*|"
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bспутник\w*|\bтыл\w*|\bдом(?:а|ов|ам|е)?\b|\bбез\b|\bтом\b|\bчисл\w*|\bмного\b|\bднр\b|\bлнр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|\bбезопасн\w*|\bвидео\b|\bпройти\b|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
 NEIGH = r"курск|воронеж|липецк|брянск|сумск|херсон|запорож|\bорёл\b|\bорел\b|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
@@ -314,7 +336,7 @@ def city_part(q):
         lat = CITY[0] + ns * k * 3.5 / 111
         lon = CITY[1] + ew * k * 3.5 / (111 * math.cos(math.radians(CITY[0])))
         rad = 2000
-    return {"lat": lat, "lon": lon, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}
+    return {"lat": lat, "lon": lon, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1, "nt": "задано в коде"}
 
 def border_near(name, pt):
     """Граница села из поиска по карте (если она там есть) рядом с закреплённой точкой: берём её вместо круга."""
@@ -341,7 +363,7 @@ def candidates(q):
     cp = city_part(q)
     if cp: return [cp]
     for rx, la, lo, rad in ALIASES:
-        if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1}]
+        if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1, "nt": "задано в коде"}]
     if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
     try:
         nq = normalize(q)
@@ -484,7 +506,10 @@ def fix_names(t):
     t = re.sub(r"\b\d{1,2}[:.]\d{2}\b", " ", t)   # время в тексте («14:39») не часть названия
     t = re.sub(r"\b[Бб]лижн\w+\s+[Ии]гумен\w+", "Ближняя Игуменка", t); t = re.sub(r"\b[Дд]альн\w+\s+[Ии]гумен\w+", "Дальняя Игуменка", t)
     t = re.sub(r"\b[Нн]овосадов\w*", "Новосадовый", t)
-    t = re.sub(r"\b[Рр]азумн\w+[,\s-]+71\b", "Разумное-71", t)   # «Разумная, 71» = микрорайон Разумное-71
+    t = re.sub(r"\b[Рр]азумн\w+[,\s-]+71\b[,\s]*", "Разумное-71, ", t)   # «Разумная, 71 беловская» = микрорайон Разумное-71 и Беловское
+    t = re.sub(r"\b[Бб]еловск(?:ая|ой|ие|ую)\b", "Беловское", t)
+    t = re.sub(r"\b[Мм]аслов(?:ой|ую|ы|а|у)?,?\s+[Пп]ристан\w*", "Маслова Пристань", t)   # «Маслова, пристань» = одно название
+    t = re.sub(r"\b[Бб]атрацк\w+\s+дач\w*", "Батрацкая Дача", t)
     t = re.sub(r"\b[Нн]икольская\b(?!\s+ул)", "Никольское", t)
     t = re.sub(r"\b[Сс]оломин[аы]?\b", "Соломино", t); t = re.sub(r"\b[Сс]оломенск\w+\s+мост", "Соломинский мост", t)
     t = re.sub(r"(развязк\w*[\s-]+[Бб]абочк\w*)", r"развязка Бабочка,", t)   # «развязка Бабочка разумное» = два места
@@ -668,6 +693,17 @@ def overpass_outline(lat, lon):
     if not polys: return None, "в карте нет нарисованной застройки рядом с селом (Overpass ответил, но пусто)"
     return {"type": "MultiPolygon", "coordinates": polys[:25]}, ""
 
+def how_found(pos):
+    """Как найдено место (для разбора и карты названий)."""
+    nt = pos.get("nt")
+    if pos.get("kind") == "route": return "полоса между названными местами"
+    if nt == "вручную": return "закреплено вручную" + (", граница из карты" if pos.get("poly") else " (круг)")
+    if nt == "контур вручную": return "контур, нарисованный вручную (outlines.json)"
+    if nt == "задано в коде": return "народное место, задано в коде"
+    if pos.get("poly"): return "граница из карты" if pos.get("kind") != "district" else "граница района из карты"
+    if pos.get("kind") == "district": return "район кругом (границы нет)"
+    return f"круг {round(pos.get('r_in') or 0)} м по точке из карты"
+
 def as_poly(pos, g):
     rings = [g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]
     xs = [p[0] for r in rings for p in r]; ys = [p[1] for r in rings for p in r]
@@ -695,7 +731,7 @@ def manual_pos(name):
             rings = [g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]
             pts = [p for r in rings for p in r]
             return as_poly({"lat": sum(p[1] for p in pts) / len(pts), "lon": sum(p[0] for p in pts) / len(pts), "kind": "settlement",
-                            "r_in": 1000, "r_out": 1500, "imp": 1}, g)
+                            "r_in": 1000, "r_out": 1500, "imp": 1, "nt": "контур вручную"}, g)
     return None
 
 def with_outline(pos, name=""):
@@ -716,7 +752,7 @@ def with_outline(pos, name=""):
 
 def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
 
-def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone):
+def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone, trace=None):
     now = now or time.time()
     drone, unknown, oblast_drone = {}, [], None
     def real_names(cand, loose_words):
@@ -731,11 +767,14 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
     feed = []
     issues = []   # сообщения, которые сайт не понял (для журнала)
     put_count = [0]
+    cur = None   # запись разбора текущего сообщения (если просили след)
     fresh_rk = lambda: {"city": False, "oblast": False, "places": {}, "last": None}
     rk = fresh_rk()
     last_rk = {}   # канал -> когда было последнее ракетное сообщение (для продолжений «В сторону…», «Шебекино»)
     def put(pos, name, p, hhmm, lvl):
         put_count[0] += 1
+        if cur is not None: cur["drawn"].append({"place": name, "level": lvl, "kind": pos.get("kind"), "how": how_found(pos), "alts": pos.get("alts"), "drop": pos.get("drop"),
+                                                 "lat": round(pos["lat"], 5), "lon": round(pos["lon"], 5)})
         k = zkey(pos); z = drone.get(k)
         if z:
             z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
@@ -749,15 +788,29 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         li = last_rk.get(p["ch"])
         cont = bool(li and p["ts"] - li["ts"] <= 300 and len(p["text"]) <= 60 and (kind is None or (kind == "alert" and re.match(r"\s*в\s+сторону\b", p["text"].lower()))))
         if cont: kind = "rocket"   # «Пуски с самолёта» / «Ракетная опасность», а следом короткое «В сторону Журавлевки» / «Шебекино»
+        cur = None
+        if trace is not None:
+            cur = {"ch": p["ch"], "id": p["id"], "ts": p["ts"], "text": p["text"], "norm": txt if txt != p["text"] else None, "kind": kind, "level": None, "skip": None,
+                   "places": [], "routes": [], "unknown": [], "drawn": [], "cleared": [], "notes": []}
+            if cont: cur["notes"].append("продолжение предыдущего ракетного сообщения канала (короткое название места следом)")
+            trace.append(cur)
         if not kind:
+            if cur is not None: cur["skip"] = skip_reason(txt)
             if SUSPECT.search(p["text"]): issues.append({"key": f'{p["ch"]}:{p["id"]}', "ch": p["ch"], "ts": p["ts"], "text": p["text"][:400], "tag": "пропущено", "reason": skip_reason(txt)})
             continue
-        if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60: continue
+        if now - p["ts"] > (ROCKET_TTL if kind.startswith("rocket") else TTL_MIN) * 60:
+            if cur is not None: cur["skip"] = "старше времени жизни зоны, на карту не попадает"
+            continue
         low = p["text"].lower()
         hhmm = datetime.fromtimestamp(p["ts"], MSK).strftime("%H:%M")
         routes, rest, loose = extract_routes(txt) if kind in ("alert", "clear", "downgrade") else ([], txt, [])
         places = extract_places(rest)
-        if cont and not places: continue
+        if cur is not None:
+            cur["places"] = list(places); cur["routes"] = [" — ".join([a] + bs) for a, bs in routes]
+            snap = {k: (z["place"], z["level"]) for k, z in drone.items()}
+        if cont and not places:
+            if cur is not None: cur["skip"] = "продолжение без названия места: пропущено"
+            continue
         fpos = None
         u0, pc0, od0 = len(unknown), put_count[0], oblast_drone
         if kind == "rocket_clear":            # первый отбой из любого канала снимает всё
@@ -783,6 +836,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         elif kind in ("clear", "downgrade"):
             names = real_names(places + [e for a, bs in routes for e in [a] + bs], [w for phr in loose for w in phr.split()])
             general = not names or re.search(ALLW, low)   # общий: без настоящих названий мест или «по всем…»
+            if cur is not None: cur["notes"].append("общий (без названий мест или «по всем…»)" if general else "по названным местам: " + ", ".join(names))
             if kind == "clear":
                 if general: drone, unknown, oblast_drone = {}, [], None
                 else:
@@ -795,6 +849,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 if general and oblast_drone: oblast_drone = {**oblast_drone, "level": "danger"}
         elif kind == "alert":
             lvl = level_of(txt)
+            if cur is not None: cur["level"] = lvl
             plv = {}   # «Краснояружский район Пролет ударных БПЛА. Ивнянский район, опасность…»: у каждой части свой уровень
             parts = split_parts(rest)
             if len(parts) > 1:
@@ -806,6 +861,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
             mass = re.search(r"массов\w*\s+пр[оа]л[её]т|массированн", lowx) and re.search(r"белгородск\w* област", lowx) and not other_first   # «массовые пролёты… Белгородская область»: по всей области, даже если названо место
             if re.search(r"всей территории|по всей области", lowx) or mass or (not places and not other_first and re.search(r"белгородск\w* област", lowx)):
                 oblast_drone = {"time": hhmm, "level": lvl}   # тревога по всей области: плашка и оранжевая рамка, без заливки
+                if cur is not None: cur["notes"].append(("тревога" if lvl == "alarm" else "опасность") + " по всей области (плашка и рамка вокруг карты)")
             rc = lambda pl: merge_forms(pl, geo)
             for phr in loose:   # «трасса Никольское Таврово»: два названия подряд = участок; а «Новая Деревня» = одно название
                 if merge_forms(phr, geo): places.append(phr)
@@ -848,6 +904,15 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                     unknown.append({"place": pl, "time": hhmm}); continue
                 fpos = fpos or pos
                 put(pos, pl, p, hhmm, plv.get(pl, lvl))
+        if cur is not None:
+            if kind == "alert": cur["unknown"] = [u["place"] for u in unknown[u0:]] if len(unknown) >= u0 else []
+            elif kind in ("clear", "downgrade"):
+                now_ = {k: (z["place"], z["level"]) for k, z in drone.items()}
+                cur["cleared"] = [snap[k][0] for k in snap if k not in now_]
+                if kind == "downgrade": cur["notes"].append("понижено до опасности: " + (", ".join(snap[k][0] for k in snap if k in now_ and now_[k][1] != snap[k][1]) or "нечего понижать"))
+                elif not cur["cleared"]: cur["notes"].append("ни одна зона не снята (названных мест на карте нет или зоны уже погасли)")
+            elif kind.startswith("rocket"):
+                cur["notes"].append("ракетная опасность: " + ("снята" if kind == "rocket_clear" else f"город и район={'да' if rk['city'] else 'нет'}, вся область={'да' if rk['oblast'] else 'нет'}, мест={len(rk['places'])}"))
         if kind == "alert":
             newu = [u["place"] for u in unknown[u0:]] if len(unknown) >= u0 else []
             base = {"key": f'{p["ch"]}:{p["id"]}', "ch": p["ch"], "ts": p["ts"], "text": p["text"][:400], "tag": "места"}
@@ -898,9 +963,15 @@ def markers():
         if time.time() - state["last_fetch"] > (5 if force else 20):
             refresh_posts()
             state["last_fetch"] = time.time()
-        out = build(list(state["posts"].values()))
-        journal_add(out.pop("issues", []))
+        tr = []; t0 = time.time()
+        out = build(list(state["posts"].values()), trace=tr)
+        PERF["build_ms"] = int((time.time() - t0) * 1000); PERF["calls"] += 1
+        journal_add(out.pop("issues", [])); archive_add(tr)
         out["fetch_age"] = round(time.time() - state["last_fetch"])   # сколько секунд назад проверены каналы
+    h = hashlib.sha1(((request.headers.get("X-Forwarded-For") or request.remote_addr or "") + SEEN_SALT).encode()).hexdigest()[:10]   # только в памяти
+    SEEN[h] = time.time()
+    if len(SEEN) > 5000:
+        for k in [k for k, v in SEEN.items() if v < time.time() - 86400]: del SEEN[k]
     out["weather"] = weather()
     if out["weather"] is None: out["weather_err"] = WX["err"]   # причина, если погоды нет (видно в /api/markers)
     return jsonify(out)
@@ -923,12 +994,14 @@ def api_test():
     texts = [t.strip() for t in re.split(r"\n\s*---+\s*\n", (request.get_json(silent=True) or {}).get("text", "")) if t.strip()][:10]
     now = time.time()
     posts = [{"ch": "test", "id": i, "text": t, "ts": now - (len(texts) - i) * 20} for i, t in enumerate(texts)]
-    with lock: out = build(posts)
-    out.pop("issues", None)
+    tr = []
+    with lock: out = build(posts, trace=tr)
+    out.pop("issues", None); out["trace"] = tr
     out["weather"] = None; out["status"] = []
     return jsonify(out)
 
 import html as _html
+from urllib.parse import quote as _urlq
 
 @app.route("/api/journal")
 def api_journal():
@@ -939,18 +1012,179 @@ def api_journal():
     tag = request.args.get("tag")
     items = sorted((v for v in JOURNAL.values() if not tag or v.get("tag") == tag), key=lambda v: v.get("ts", 0), reverse=True)[:200]
     if request.args.get("json") == "1": return jsonify(items)
+    if request.args.get("txt") == "1":
+        r = Response("\n\n".join(_entry_text(v) for v in items) or "(журнал пуст)", mimetype="text/plain; charset=utf-8")
+        r.headers["Content-Disposition"] = "attachment; filename=journal.txt"; return r
     q = lambda **kw: "?" + "&".join([f"key={key}"] + [f"{k}={v}" for k, v in kw.items()])
     cards = "".join(
         f"<div style='border-left:5px solid {'#f80' if v.get('tag') == 'места' else '#999'};background:#f6f6f6;margin:8px 0;padding:8px 10px;border-radius:4px'>"
         f"<small>{datetime.fromtimestamp(v.get('ts', 0), MSK).strftime('%d.%m %H:%M')} · {_html.escape(v.get('ch', ''))} · {_html.escape(v.get('tag', ''))}</small><br>"
-        f"<b>{_html.escape(v.get('reason', ''))}</b><br><span style='white-space:pre-wrap'>{_html.escape(v.get('text', ''))}</span></div>" for v in items) or "<p>Пока пусто: всё, что приходило, сайт понял.</p>"
+        f"<b>{_html.escape(v.get('reason', ''))}</b><br><span style='white-space:pre-wrap'>{_html.escape(v.get('text', ''))}</span><br>"
+        f"<a href='/?test={key}&text={_urlq(v.get('text', ''))}' target='_blank'>🔍 Разобрать по шагам</a></div>" for v in items) or "<p>Пока пусто: всё, что приходило, сайт понял.</p>"
     body = ("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<body style='font-family:sans-serif;padding:12px;max-width:760px;margin:auto;line-height:1.45'>"
-            f"<h3>Журнал: что сайт не понял</h3><p>Записей: {len(items)}. "
+            f"<h3>Журнал: что сайт не понял</h3><p><a href='/api/bundle?key={key}'><b>⬇ Скачать всё для Claude</b></a> (состояние + журнал + архив) · <a href='{q(txt=1)}'>⬇ только журнал текстом</a></p><p>Записей: {len(items)}. "
             f"<a href='{q()}'>все</a> · <a href='{q(tag='места')}'>места</a> · <a href='{q(tag='пропущено')}'>пропущено</a> · <a href='{q(clear=1)}'>очистить</a></p>"
             "<p><small>«Места»: сообщение признано оповещением, но место не найдено или ничего не нарисовано. «Пропущено»: похоже на оповещение, но сайт его не использовал (реклама, сводка, нет признаков). Хранится 7 дней, при обновлении сайта на Render журнал обнуляется.</small></p>"
             + cards + "</body>")
     return Response(body, mimetype="text/html")
+
+def _md5(path):
+    try: return hashlib.md5(open(path, "rb").read()).hexdigest()[:10]
+    except Exception: return None
+
+def _mt(path):
+    try: return datetime.fromtimestamp(os.path.getmtime(path), MSK).strftime("%d.%m %H:%M")
+    except Exception: return "нет файла"
+
+def probe_all():
+    res = []
+    def t(name, fn):
+        t0 = time.time()
+        try: msg = fn(); res.append((name, True, msg or "ответил", int((time.time() - t0) * 1000)))
+        except Exception as e: res.append((name, False, f"{type(e).__name__}: {str(e)[:120]}", int((time.time() - t0) * 1000)))
+    def nom():
+        r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=6, params={"q": "Белгород", "format": "json", "limit": 1}); r.raise_for_status(); return f"результатов: {len(r.json())}"
+    t("Карта (Nominatim)", nom)
+    for u in OV_URLS:
+        def ov(u=u):
+            r = requests.get(u, headers={"User-Agent": UA}, timeout=6, params={"data": "[out:json][timeout:3];node(1);out;"}); r.raise_for_status()
+        t("Контуры застройки (Overpass) " + u.split("/")[2], ov)
+    t("Telegram, канал " + CHANNELS[0], lambda: f"сообщений на странице: {len(fetch_posts(CHANNELS[0], None))}")
+    def wx():
+        r = requests.get("https://api.open-meteo.com/v1/forecast", headers={"User-Agent": UA}, timeout=6, params={"latitude": CENTER["lat"], "longitude": CENTER["lon"], "current": "temperature_2m"}); r.raise_for_status()
+    t("Погода (Open-Meteo)", wx)
+    return res
+
+def _status_html(key, probe):
+    now = time.time()
+    here = os.path.dirname(os.path.abspath(__file__))
+    P = lambda *a: os.path.join(here, *a)
+    def row(ok, label, val): return f"<tr><td>{'✅' if ok is True else '⚠️' if ok is False else '•'}</td><td>{_html.escape(label)}</td><td>{val}</td></tr>"
+    ago = lambda t: "никогда" if not t else (f"{round(now - t)} с назад" if now - t < 120 else f"{round((now - t) / 60)} мин назад")
+    rows = []
+    rows.append(row(None, "Метка сборки", f"<b>{_html.escape(BUILD)}</b>"))
+    for name, rel in (("app.py", "app.py"), ("index.html (static)", os.path.join("static", "index.html")), ("outlines.json", "outlines.json"), ("places.json", "places.json"), ("geocache_seed3.json", "geocache_seed3.json")):
+        h = _md5(P(rel)); rows.append(row(None if name in ("places.json",) and not h else bool(h), name, f"контрольная сумма <b>{h}</b>, файл от {_mt(P(rel))}" if h else "нет такого файла"))
+    rows.append(row(None, "Процесс запущен", f"{round((now - START_TS) / 60)} мин назад (при каждом обновлении на Render начинается заново)"))
+    rows.append(row(None, "Последнее чтение каналов", ago(state["last_fetch"])))
+    rows.append(row(None, "Разбор сообщений (последний)", f"{PERF['build_ms']} мс; запросов страницы с запуска: {PERF['calls']}"))
+    rows.append(row(None, "Устройств с запросами", f"за 5 минут: {sum(1 for v in SEEN.values() if v > now - 300)}, за сутки: {sum(1 for v in SEEN.values() if v > now - 86400)} (адреса не хранятся)"))
+    chrows = []
+    for ch in CHANNELS:
+        st = state["status"].get(ch, {}); posts = [p for k, p in state["posts"].items() if k[0] == ch]
+        ok = bool(st.get("ok")) and not st.get("err") and now - st.get("ok", 0) < 180
+        chrows.append(row(ok, ch, f"читался {ago(st.get('ok'))}; сообщений в памяти: {len(posts)}; последнее: {ago(max((p['ts'] for p in posts), default=0))}"))
+    srv = []
+    if probe:
+        for name, ok, msg, ms in probe_all(): srv.append(row(ok, name, f"{_html.escape(msg)} ({ms} мс)"))
+    else:
+        srv.append(row(None, "Проверка сервисов", f"<a href='{'?key=' + key + '&probe=1'}'>запустить сейчас</a> (занимает до 30 секунд)"))
+        srv.append(row(OV["t"] == 0 or now - OV["t"] > 1800, "Контуры застройки (Overpass)", "выключен переменной OVERPASS=0" if not OVERPASS_ON else (_html.escape(OV["err"]) if OV["t"] and now - OV["t"] < 1800 else "последняя попытка не падала")))
+        srv.append(row(not WX["err"], "Погода", _html.escape(WX["err"] or "работает")))
+    nr = sum(1 for k in geocache if str(k).startswith("nr|")); seen_n = len(NAMES_STATE); found = sum(1 for v in NAMES_STATE.values() if v.get("ok"))
+    mem = [row(None, "Память мест (ответы карты)", f"{nr} записей, из файла-заготовки загружено: {SEED_N}"),
+           row(None, "Контуры, нарисованные вручную", f"{len(outlines)}: {_html.escape(', '.join(sorted(outlines)))}"),
+           row(None, "Закреплённые места", f"{len(manual)}"),
+           row(None, "Прогрев и карта названий", f"{'идёт: ' + str(WARM['done']) + ' из ' + str(WARM['total']) if WARM['running'] else 'не запущен' if not seen_n else 'готово'}; названий проверено: {seen_n}, найдено: {found}"),
+           row(None, "Журнал", f"записей: {len(JOURNAL)}"),
+           row(None, "Архив сообщений", f"{len(ARCHIVE)} сообщений" + (f", с {datetime.fromtimestamp(min(v['ts'] for v in ARCHIVE.values()), MSK).strftime('%d.%m %H:%M')}" if ARCHIVE else ""))]
+    cfg = [row(None, "Каналы", _html.escape(", ".join(CHANNELS))), row(None, "Жизнь зоны БПЛА / ракетной опасности", f"{TTL_MIN} / {ROCKET_TTL} мин"), row(None, "Регион", _html.escape(REGION))]
+    sec = lambda title, rs: f"<h4>{title}</h4><table>{''.join(rs)}</table>"
+    links = " · ".join(f"<a href='{u}'>{t}</a>" for t, u in (("журнал", f"/api/journal?key={key}"), ("архив", f"/api/archive?key={key}"), ("⬇ всё для Claude", f"/api/bundle?key={key}"), ("карта названий", f"/api/names?key={key}"), ("прогреть память", f"/api/warm?key={key}"), ("проверка разбора", f"/?test={key}")))
+    body = ("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><style>td{padding:3px 8px 3px 0;vertical-align:top}table{border-collapse:collapse}h4{margin:16px 0 4px}</style>"
+            "<body style='font-family:sans-serif;padding:12px;max-width:820px;margin:auto;line-height:1.4;font-size:14px'><h3>Состояние сайта</h3>"
+            f"<p>{links}</p>" + sec("Версия и работа", rows) + sec("Каналы Telegram", chrows) + sec("Внешние сервисы", srv) + sec("Память и данные", mem) + sec("Настройки", cfg) +
+            f"<p><small>Сверяйся с контрольными суммами: я называю их в сообщении при выдаче файлов. Если сумма на странице другая, на Render загружена не та версия. Сейчас на сервере: {datetime.now(MSK).strftime('%d.%m.%Y %H:%M:%S')}.</small></p></body>")
+    return body
+
+@app.route("/api/status")
+def api_status():
+    """Состояние сайта: какая версия загружена, что с каналами и сервисами, сколько в памяти. Только с паролем."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    return Response(_status_html(request.args.get("key"), request.args.get("probe") == "1"), mimetype="text/html")
+
+def _plain(h):
+    t = re.sub(r"<style.*?</style>", "", h, flags=re.S); t = re.sub(r"</tr>|<br>|</h4>|</p>|</h3>|</div>", "\n", t); t = re.sub(r"</td>", "  ", t)
+    return re.sub(r"\n\s*\n+", "\n", _html.unescape(re.sub(r"<[^>]+>", "", t))).strip()
+
+def _entry_text(v):
+    t = datetime.fromtimestamp(v.get("ts", 0), MSK).strftime("%d.%m %H:%M")
+    return f"[{t}] {v.get('ch', '')} · {v.get('tag') or v.get('kind') or 'не оповещение'}{(' · ' + str(v.get('level'))) if v.get('level') else ''} · {v.get('reason') or v.get('skip') or ''}\n{v.get('text', '')}"
+
+@app.route("/api/bundle")
+def api_bundle():
+    """Один текстовый файл для разбора: состояние сайта, журнал непонятого и последние 200 сообщений архива с тем, как сайт их понял. Только с паролем."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    key = request.args.get("key")
+    jr = sorted(JOURNAL.values(), key=lambda v: v.get("ts", 0), reverse=True)
+    ar = sorted(ARCHIVE.values(), key=lambda v: v.get("ts", 0), reverse=True)[:200]
+    out = [f"ОТЧЁТ САЙТА ДЛЯ CLAUDE · {datetime.now(MSK).strftime('%d.%m.%Y %H:%M:%S')} МСК", "", "=== СОСТОЯНИЕ САЙТА ===", _plain(_status_html(key, False)), "", f"=== ЖУРНАЛ: ЧТО САЙТ НЕ ПОНЯЛ ({len(jr)}) ==="]
+    out += [_entry_text(v) + "\n" for v in jr] or ["(пусто)"]
+    out += ["", f"=== АРХИВ: ПОСЛЕДНИЕ {len(ar)} СООБЩЕНИЙ И КАК САЙТ ИХ ПОНЯЛ ==="]
+    for v in ar:
+        extra = [x for x in (("места: " + "; ".join(v["places"])) if v.get("places") else "", ("не найдено: " + "; ".join(v["unknown"])) if v.get("unknown") else "", ("нарисовано: " + "; ".join(v["drawn"])) if v.get("drawn") else "",
+                              ("снято: " + "; ".join(v["cleared"])) if v.get("cleared") else "", " / ".join(v.get("notes") or [])) if x]
+        out.append(_entry_text(v) + ("\n  → " + "\n  → ".join(extra) if extra else "") + "\n")
+    r = Response("\n".join(out), mimetype="text/plain; charset=utf-8")
+    r.headers["Content-Disposition"] = f"attachment; filename=claude-report-{datetime.now(MSK).strftime('%Y%m%d-%H%M')}.txt"
+    return r
+
+@app.route("/api/archive")
+def api_archive():
+    """Архив всех сообщений из каналов за 7 дней вместе с тем, как сайт их понял; можно скачать файлом. Только с паролем."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    key = request.args.get("key")
+    items = sorted(ARCHIVE.values(), key=lambda v: v.get("ts", 0))
+    fmt = lambda v: {**v, "time": datetime.fromtimestamp(v.get("ts", 0), MSK).strftime("%d.%m.%Y %H:%M")}
+    if request.args.get("download") == "1":
+        r = Response(json.dumps([fmt(v) for v in items], ensure_ascii=False, indent=1), mimetype="application/json")
+        r.headers["Content-Disposition"] = "attachment; filename=archive.json"; return r
+    cnt = {}
+    for v in items: cnt[v.get("kind") or "не оповещение"] = cnt.get(v.get("kind") or "не оповещение", 0) + 1
+    last = list(reversed(items))[:120]
+    color = lambda v: "#d33" if v.get("kind") == "alert" and v.get("level") == "alarm" else "#cc9a00" if v.get("kind") == "alert" else "#2e9e4f" if v.get("kind") in ("clear", "rocket_clear") else "#b00000" if v.get("kind") == "rocket" else "#999"
+    cards = "".join(
+        f"<div style='border-left:5px solid {color(v)};background:#f6f6f6;margin:7px 0;padding:7px 10px;border-radius:4px'><small>{fmt(v)['time']} · {_html.escape(v.get('ch', ''))} · {_html.escape(str(v.get('kind') or 'не оповещение'))}"
+        f"{' · ' + _html.escape(v['skip']) if v.get('skip') else ''}</small><br><span style='white-space:pre-wrap'>{_html.escape(v.get('text', ''))}</span>"
+        + (f"<br><small>места: {_html.escape('; '.join(v.get('places') or []))}</small>" if v.get("places") else "") + (f"<br><small style='color:#c60'>не найдено: {_html.escape('; '.join(v['unknown']))}</small>" if v.get("unknown") else "")
+        + f"<br><a href='/?test={key}&text={_urlq(v.get('text', ''))}' target='_blank'>🔍 Разобрать по шагам</a></div>" for v in last)
+    body = ("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><body style='font-family:sans-serif;padding:12px;max-width:760px;margin:auto;line-height:1.45'>"
+            f"<h3>Архив сообщений</h3><p>Всего: {len(items)}. " + ", ".join(f"{k}: {n}" for k, n in sorted(cnt.items())) + f"</p><p><a href='/api/bundle?key={key}'><b>⬇ Скачать всё для Claude</b></a> · <a href='?key={key}&download=1'>архив файлом (JSON)</a> · <a href='/api/status?key={key}'>состояние сайта</a></p>"
+            "<p><small>Хранится 7 дней. При обновлении сайта на Render архив обнуляется: скачивай его до загрузки новых файлов. Показаны последние 120.</small></p>" + (cards or "<p>Пока пусто.</p>") + "</body>")
+    return Response(body, mimetype="text/html")
+
+NAMES_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>html,body{margin:0;height:100%;font-family:sans-serif}#top{padding:8px 10px;font-size:13px;line-height:1.45;max-height:30vh;overflow:auto;background:#fff}#map{height:70vh}.f{display:inline-block;margin:2px 6px 2px 0;padding:1px 7px;border-radius:9px;color:#fff;font-size:12px}</style>
+<div id="top">Загрузка…</div><div id="map"></div>
+<script>
+const KEY='__KEY__',COL={manual:'#7b2cbf',border:'#2e9e4f',circle:'#f08c00',code:'#1c7ed6'};
+const map=L.map('map').setView([50.6,36.6],9);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cls=v=>/вручную/.test(v.how)?'manual':/задано в коде/.test(v.how)?'code':/граница/.test(v.how)?'border':'circle';
+fetch('/api/names?key='+encodeURIComponent(KEY)+'&json=1').then(r=>r.json()).then(a=>{
+  const top=document.getElementById('top');
+  if(!a.length){top.innerHTML='Пока нет данных. Сначала запустите <a href="/api/warm?key='+encodeURIComponent(KEY)+'">прогрев памяти</a> (несколько минут), потом обновите эту страницу.';return}
+  const bad=a.filter(v=>!v.ok),far=a.filter(v=>v.ok&&v.km>60),many=a.filter(v=>v.ok&&v.nalts>=3),circ=a.filter(v=>v.ok&&cls(v)==='circle');
+  a.filter(v=>v.ok).forEach(v=>{const c=COL[cls(v)];
+    if(v.poly)L.geoJSON(v.poly,{style:{color:c,weight:2,fillColor:c,fillOpacity:.25},interactive:false}).addTo(map);
+    else if(v.r_in)L.circle([v.lat,v.lon],{radius:v.r_in,color:c,weight:2,fillColor:c,fillOpacity:.2,interactive:false}).addTo(map);
+    L.circleMarker([v.lat,v.lon],{radius:6,color:'#fff',weight:2,fillColor:c,fillOpacity:1}).addTo(map)
+      .bindPopup('<b>'+esc(v.name)+'</b><br>'+esc(v.how)+'<br>'+esc(v.dn||'')+'<br>'+v.km+' км от центра Белгорода, тип: '+esc(v.nt||'?')+', важность '+v.imp+'<br>вариантов в карте: '+v.nalts)});
+  const chips=(t,col)=>'<span class="f" style="background:'+col+'">'+t+'</span>';
+  const names=l=>l.map(v=>esc(v.name)+(v.ok?' ('+v.km+' км)':'')).join(', ')||'нет';
+  top.innerHTML='<b>Карта названий</b> ('+a.length+'): '+chips('закреплено или нарисовано вручную',COL.manual)+chips('граница из карты',COL.border)+chips('круг (границы в карте нет)',COL.circle)+chips('задано в коде',COL.code)
+   +'<br><b style="color:#c00">Не найдено ('+bad.length+'):</b> '+names(bad)+'<br><b style="color:#c60">Дальше 60 км от Белгорода ('+far.length+'):</b> '+names(far)
+   +'<br><b style="color:#c60">Много одноимённых в карте, 3 и больше ('+many.length+'):</b> '+names(many)+'<br><b>Кругом ('+circ.length+'):</b> '+names(circ)});
+</script>"""
+
+@app.route("/api/names")
+def api_names():
+    """Карта названий: все известные места на одной карте, цвет показывает, как найдено; видно, что стоит не там. Заполняется прогревом памяти."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    if request.args.get("json") == "1": return jsonify(sorted(NAMES_STATE.values(), key=lambda v: v["name"]))
+    return Response(NAMES_PAGE.replace("__KEY__", request.args.get("key")), mimetype="text/html")
 
 @app.route("/api/oblast")
 def api_oblast():
@@ -990,15 +1224,41 @@ WARM_NAMES = [
     "Губкинский район", "Старооскольский район", "Шебекинский район", "Грайворонский район", "Борисовский район", "Корочанский район", "Волоконовский район", "Валуйский район",
     "Белгородский район", "Яковлевский район", "Ракитянский район", "Красногвардейский район", "Новооскольский район", "Ивнянский район", "Прохоровский район",
     "Чернянский район", "Вейделевский район", "Алексеевский район", "Красненский район", "Ровеньский район", "Краснояружский район"]
+NAMES_STATE = {}   # название -> как найдено (заполняется прогревом): для «Карты названий»
+
+def thin(g, maxpts=80):
+    """Упрощённая копия границы для карты названий (каждая n-я точка)."""
+    def ring(r):
+        k = max(1, len(r) // maxpts); out = r[::k]
+        return out if out[-1] == r[-1] else out + [r[-1]]
+    if not g: return None
+    return {"type": g["type"], "coordinates": [[ring(r) for r in p] for p in g["coordinates"]] if g["type"] == "MultiPolygon" else [ring(r) for r in g["coordinates"]]}
+
+def names_info(n):
+    pk = resolve([n], lambda pl: merge_forms(pl, candidates)); pos = pk.get(n)
+    if not pos: return {"name": n, "ok": False}
+    pos = with_outline(pos, n)
+    return {"name": n, "ok": True, "lat": round(pos["lat"], 5), "lon": round(pos["lon"], 5), "how": how_found(pos), "kind": pos.get("kind"), "nt": pos.get("nt"), "dn": pos.get("dn"),
+            "km": round(dkm(pos, (CENTER["lat"], CENTER["lon"])), 1), "imp": round(pos.get("imp") or 0, 2), "nalts": len(pos.get("alts") or []), "r_in": pos.get("r_in"), "poly": thin(pos.get("poly"))}
+
+def warm_list():
+    extra = [v[4] for v in BUILTIN_PLACES.values() if len(v) > 4] + [k.capitalize() for k in outlines] + ["район аэропорта", "район Сити Молла", "район вокзала", "26-й километр", "развязка Бабочка", "кольцо Я люблю Белгород", "Парк Дуба"]
+    seen, out = set(), []
+    for n in WARM_NAMES + extra:
+        if n.lower() not in seen: seen.add(n.lower()); out.append(n)
+    return out
+
 WARM = {"running": False, "done": 0, "total": 0, "bad": [], "t0": 0}
 
 def _warm():
-    WARM.update(running=True, done=0, total=len(WARM_NAMES), bad=[], t0=time.time())
-    for n in WARM_NAMES:
+    names = warm_list()
+    WARM.update(running=True, done=0, total=len(names), bad=[], t0=time.time())
+    for n in names:
         try:
             if not candidates(n): WARM["bad"].append(n)
+            NAMES_STATE[n] = names_info(n)
         except Exception:
-            WARM["bad"].append(n)
+            WARM["bad"].append(n); NAMES_STATE[n] = {"name": n, "ok": False}
         WARM["done"] += 1
     WARM["running"] = False
 
@@ -1013,7 +1273,7 @@ def api_warm():
     mins = round((time.time() - w["t0"]) / 60, 1) if w["t0"] else 0
     body = (f"<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>" + ("" if done else "<meta http-equiv='refresh' content='8'>") +
             f"<body style='font-family:sans-serif;padding:16px;line-height:1.5'><h3>Прогрев памяти</h3>"
-            f"<p>{'Готово' if done else 'Идёт'}: {w['done']} из {w['total'] or len(WARM_NAMES)} названий, прошло {mins} мин.</p>"
+            f"<p>{'Готово' if done else 'Идёт'}: {w['done']} из {w['total'] or len(warm_list())} названий, прошло {mins} мин.</p>"
             + ("<p><b>Теперь нажми: <a href='/api/geocache'>скачать найденные места</a></b> и загрузи файл на GitHub в корень.</p>" if done else "<p>Страница обновляется сама. Закрывать её можно, прогрев идёт на сервере.</p>")
             + (f"<p>Не нашлось: {', '.join(w['bad'])}</p>" if w["bad"] else "") + "</body>")
     return Response(body, mimetype="text/html")
