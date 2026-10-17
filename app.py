@@ -187,6 +187,8 @@ def extract_places(text):
         out += _places_in(re.split(STOP, sent, maxsplit=1, flags=re.I)[0], text)
     if out and re.match(r"(?:улица|ул\.)\s", out[0], re.I):   # «улица Корочанская, Волчанская, Студенческая»: все названия улицы
         out = [out[0]] + ["улица " + x if re.fullmatch(r"[А-ЯЁ][а-яё]+(?:ская|ная|ая|ой|ий)", x) else x for x in out[1:]]
+    elif out and re.fullmatch(r"[А-ЯЁа-яё-]{4,}(?:ая|яя)\s+(?:улица|ул\.?)", out[0], re.I):   # «Никольская улица, Луговая, Отрадная»: следующие женские прилагательные тоже улицы
+        out = [out[0]] + [x + " улица" if re.fullmatch(r"[А-ЯЁа-яё-]{5,}(?:ая|яя)", x) else x for x in out[1:]]
     return out
 
 def _places_in(head, text):
@@ -346,6 +348,25 @@ def border_near(name, pt):
     near = [x for x in cands if x.get("poly") and dkm(x, pt) <= 3]
     return min(near, key=lambda x: dkm(x, pt))["poly"] if near else None
 
+STREET_A = re.compile(r"^(?:улиц\w*|ул\.?)\s+(.+)$", re.I)
+STREET_B = re.compile(r"^(.+?)\s+(?:улиц\w*|ул\.?)$", re.I)
+
+def street_query(q):
+    """«Никольская улица» / «улица Луговая» или одиночное женское прилагательное («Луговая», «Отрадная»): это улица Белгорода. Возвращает (название, сказано ли слово «улица»)."""
+    q = q.strip()
+    m = STREET_A.match(q) or STREET_B.match(q)
+    if m: return m.group(1).strip() + " улица", True
+    if re.fullmatch(r"[А-ЯЁа-яё-]{5,}(?:ая|яя)", q): return q + " улица", False
+    return None, False
+
+def street_candidates(street):
+    stem = street.split()[0][:5].lower()
+    got = nominatim(f"{street}, Белгород", street, vb=LOCAL_VB)
+    out = [x for x in got if "белгород" in (x.get("dn") or "").lower() and stem in (x.get("dn") or "").lower().split(",")[0]]
+    if not out: return []
+    x = min(out, key=lambda y: dkm(y, (CENTER["lat"], CENTER["lon"])))   # одноимённые улицы в других сёлах не нужны
+    return [{**x, "kind": "object", "r_in": 500, "r_out": 750, "poly": None, "nt": "улица", "imp": max(x.get("imp") or 0, .3)}]
+
 def candidates(q):
     """Список вариантов места (до 5), лучший по важности первым."""
     low = q.lower()
@@ -366,6 +387,10 @@ def candidates(q):
         if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1, "nt": "задано в коде"}]
     if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
     try:
+        st, explicit = street_query(q)
+        if st:
+            got = street_candidates(st)
+            if got or explicit: return got   # сказано «улица»: другого места не ищем; одиночное «Луговая» без улицы при неудаче ищется как село
         nq = normalize(q)
         sd = split_district(nq)
         res = []
@@ -700,6 +725,7 @@ def how_found(pos):
     if nt == "вручную": return "закреплено вручную" + (", граница из карты" if pos.get("poly") else " (круг)")
     if nt == "контур вручную": return "контур, нарисованный вручную (outlines.json)"
     if nt == "задано в коде": return "народное место, задано в коде"
+    if nt == "улица": return f"улица в Белгороде, круг {round(pos.get('r_in') or 0)} м по точке из карты"
     if pos.get("poly"): return "граница из карты" if pos.get("kind") != "district" else "граница района из карты"
     if pos.get("kind") == "district": return "район кругом (границы нет)"
     return f"круг {round(pos.get('r_in') or 0)} м по точке из карты"
@@ -778,9 +804,11 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
         k = zkey(pos); z = drone.get(k)
         if z:
             z["sources"].add(p["ch"]); z.update(last=p["ts"], text=p["text"], time=hhmm)
+            pk_ = f'{p["ch"]}:{p["id"]}'
+            if pk_ not in z["keys"]: z["keys"] = (z["keys"] + [pk_])[-6:]
             if lvl == "alarm": z["level"] = "alarm"   # опасность усиливается до тревоги, обратно не понижается
         else:
-            drone[k] = {**pos, "place": name, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm,
+            drone[k] = {**pos, "place": name, "sources": {p["ch"]}, "last": p["ts"], "text": p["text"], "time": hhmm, "how": how_found(pos), "keys": [f'{p["ch"]}:{p["id"]}'],
                         "level": lvl, "pt": pos.get("kind") == "object"}
     for p in sorted(posts, key=lambda p: p["ts"]):
         txt = fix_names(p["text"])
@@ -918,7 +946,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
             base = {"key": f'{p["ch"]}:{p["id"]}', "ch": p["ch"], "ts": p["ts"], "text": p["text"][:400], "tag": "места"}
             if newu: issues.append({**base, "reason": "не найдено: " + ", ".join(newu[:6])})
             elif put_count[0] == pc0 and oblast_drone is od0: issues.append({**base, "reason": "ничего не нарисовано: места не распознаны"})
-        feed.append({"ch": p["ch"], "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "level": level_of(txt) if kind == "alert" else ("danger" if kind == "downgrade" else None), "text": p["text"][:220],
+        feed.append({"ch": p["ch"], "key": f'{p["ch"]}:{p["id"]}', "time": hhmm, "age": round((now - p["ts"]) / 60), "kind": kind, "level": level_of(txt) if kind == "alert" else ("danger" if kind == "downgrade" else None), "text": p["text"][:220],
                      "lat": fpos["lat"] if fpos else None, "lon": fpos["lon"] if fpos else None})
     marks = [{**{k: v for k, v in z.items() if k not in ("sources", "last")},
               "age": round((now - z["last"]) / 60), "n": len(z["sources"])} for z in drone.values()]
@@ -967,6 +995,7 @@ def markers():
         out = build(list(state["posts"].values()), trace=tr)
         PERF["build_ms"] = int((time.time() - t0) * 1000); PERF["calls"] += 1
         journal_add(out.pop("issues", [])); archive_add(tr)
+        if request.args.get("trace") == "1" and TEST_KEY and request.args.get("key") == TEST_KEY: out["trace"] = tr   # разбор всех текущих сообщений: только режиму проверки
         out["fetch_age"] = round(time.time() - state["last_fetch"])   # сколько секунд назад проверены каналы
     h = hashlib.sha1(((request.headers.get("X-Forwarded-For") or request.remote_addr or "") + SEEN_SALT).encode()).hexdigest()[:10]   # только в памяти
     SEEN[h] = time.time()
@@ -1017,14 +1046,15 @@ def api_journal():
         r.headers["Content-Disposition"] = "attachment; filename=journal.txt"; return r
     q = lambda **kw: "?" + "&".join([f"key={key}"] + [f"{k}={v}" for k, v in kw.items()])
     cards = "".join(
-        f"<div style='border-left:5px solid {'#f80' if v.get('tag') == 'места' else '#999'};background:#f6f6f6;margin:8px 0;padding:8px 10px;border-radius:4px'>"
+        f"<div style='border-left:5px solid {'#d33' if v.get('tag') == 'ошибка зоны' else '#f80' if v.get('tag') == 'места' else '#999'};background:#f6f6f6;margin:8px 0;padding:8px 10px;border-radius:4px'>"
         f"<small>{datetime.fromtimestamp(v.get('ts', 0), MSK).strftime('%d.%m %H:%M')} · {_html.escape(v.get('ch', ''))} · {_html.escape(v.get('tag', ''))}</small><br>"
         f"<b>{_html.escape(v.get('reason', ''))}</b><br><span style='white-space:pre-wrap'>{_html.escape(v.get('text', ''))}</span><br>"
+        f"{('<small style=white-space:pre-wrap;color:#444>' + _html.escape(v.get('detail', '')) + '</small><br>') if v.get('detail') else ''}"
         f"<a href='/?test={key}&text={_urlq(v.get('text', ''))}' target='_blank'>🔍 Разобрать по шагам</a></div>" for v in items) or "<p>Пока пусто: всё, что приходило, сайт понял.</p>"
     body = ("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<body style='font-family:sans-serif;padding:12px;max-width:760px;margin:auto;line-height:1.45'>"
             f"<h3>Журнал: что сайт не понял</h3><p><a href='/api/bundle?key={key}'><b>⬇ Скачать всё для Claude</b></a> (состояние + журнал + архив) · <a href='{q(txt=1)}'>⬇ только журнал текстом</a></p><p>Записей: {len(items)}. "
-            f"<a href='{q()}'>все</a> · <a href='{q(tag='места')}'>места</a> · <a href='{q(tag='пропущено')}'>пропущено</a> · <a href='{q(clear=1)}'>очистить</a></p>"
+            f"<a href='{q()}'>все</a> · <a href='{q(tag='ошибка зоны')}'>ошибки зон</a> · <a href='{q(tag='места')}'>места</a> · <a href='{q(tag='пропущено')}'>пропущено</a> · <a href='{q(clear=1)}'>очистить</a></p>"
             "<p><small>«Места»: сообщение признано оповещением, но место не найдено или ничего не нарисовано. «Пропущено»: похоже на оповещение, но сайт его не использовал (реклама, сводка, нет признаков). Хранится 7 дней, при обновлении сайта на Render журнал обнуляется.</small></p>"
             + cards + "</body>")
     return Response(body, mimetype="text/html")
@@ -1087,7 +1117,7 @@ def _status_html(key, probe):
            row(None, "Контуры, нарисованные вручную", f"{len(outlines)}: {_html.escape(', '.join(sorted(outlines)))}"),
            row(None, "Закреплённые места", f"{len(manual)}"),
            row(None, "Прогрев и карта названий", f"{'идёт: ' + str(WARM['done']) + ' из ' + str(WARM['total']) if WARM['running'] else 'не запущен' if not seen_n else 'готово'}; названий проверено: {seen_n}, найдено: {found}"),
-           row(None, "Журнал", f"записей: {len(JOURNAL)}"),
+           row(None, "Журнал", f"записей: {len(JOURNAL)}, из них отметок «неверно»: {sum(1 for v in JOURNAL.values() if v.get('tag') == 'ошибка зоны')}"),
            row(None, "Архив сообщений", f"{len(ARCHIVE)} сообщений" + (f", с {datetime.fromtimestamp(min(v['ts'] for v in ARCHIVE.values()), MSK).strftime('%d.%m %H:%M')}" if ARCHIVE else ""))]
     cfg = [row(None, "Каналы", _html.escape(", ".join(CHANNELS))), row(None, "Жизнь зоны БПЛА / ракетной опасности", f"{TTL_MIN} / {ROCKET_TTL} мин"), row(None, "Регион", _html.escape(REGION))]
     sec = lambda title, rs: f"<h4>{title}</h4><table>{''.join(rs)}</table>"
@@ -1110,7 +1140,7 @@ def _plain(h):
 
 def _entry_text(v):
     t = datetime.fromtimestamp(v.get("ts", 0), MSK).strftime("%d.%m %H:%M")
-    return f"[{t}] {v.get('ch', '')} · {v.get('tag') or v.get('kind') or 'не оповещение'}{(' · ' + str(v.get('level'))) if v.get('level') else ''} · {v.get('reason') or v.get('skip') or ''}\n{v.get('text', '')}"
+    return f"[{t}] {v.get('ch', '')} · {v.get('tag') or v.get('kind') or 'не оповещение'}{(' · ' + str(v.get('level'))) if v.get('level') else ''} · {v.get('reason') or v.get('skip') or ''}\n{v.get('text', '')}" + (("\n" + v["detail"]) if v.get("detail") else "")
 
 @app.route("/api/bundle")
 def api_bundle():
@@ -1185,6 +1215,39 @@ def api_names():
     if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
     if request.args.get("json") == "1": return jsonify(sorted(NAMES_STATE.values(), key=lambda v: v["name"]))
     return Response(NAMES_PAGE.replace("__KEY__", request.args.get("key")), mimetype="text/html")
+
+FB_COUNT = {"n": 0}
+
+@app.route("/api/feedback", methods=["POST"])
+def api_feedback():
+    """Отметка «неверно» из режима проверки: зона или сообщение попадает в журнал вместе со всем, что нужно для разбора. Только с паролем."""
+    if not TEST_KEY or request.args.get("key") != TEST_KEY: return ("", 404)
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict): return jsonify({"error": "нужен JSON"}), 400
+    S = lambda k, n=200: str(d.get(k) if d.get(k) is not None else "")[:n]
+    kind = "zone" if d.get("kind") == "zone" else "message"
+    reason = S("reason", 120) or "причина не указана"
+    L = []
+    if kind == "zone":
+        L.append(f"Зона: {S('place', 80)} · {'опасность' if d.get('level') == 'danger' else 'тревога'} · тип {S('zone_kind', 30)} · как найдена: {S('how', 120)} · точка {S('lat', 12)}, {S('lon', 12)}")
+        if isinstance(d.get("alts"), list) and d["alts"]:
+            L.append("Варианты в карте: " + " | ".join(f"{'★ ' if a.get('chosen') else ''}{a.get('km')} км от центра, {a.get('nt')}, «{a.get('dn')}»" for a in d["alts"][:6] if isinstance(a, dict)))
+    else:
+        L.append(f"Сообщение {S('key', 60)} от {S('time', 10)} · {S('msgkind', 20)}{(' · ' + S('level', 10)) if d.get('level') else ''}")
+    c = d.get("correct")
+    if isinstance(c, dict) and c.get("lat") is not None: L.append(f"Правильное место (отмечено на карте): {S_num(c.get('lat'))}, {S_num(c.get('lon'))}")
+    if S("comment", 400): L.append("Комментарий: " + S("comment", 400))
+    if isinstance(d.get("keys"), list) and d["keys"]: L.append("Сообщения, из которых появилась зона: " + ", ".join(str(x)[:60] for x in d["keys"][:6]))
+    L.append("Источник данных: " + (S("source", 40) or "не указан"))
+    FB_COUNT["n"] += 1
+    entry = {"key": f"fb:{int(time.time() * 1000)}:{FB_COUNT['n']}", "ch": S("ch", 40) or "проверка", "ts": time.time(), "tag": "ошибка зоны",
+             "reason": (f"зона «{S('place', 80)}»: " if kind == "zone" else "сообщение: ") + reason, "text": S("text", 600), "detail": "\n".join(L)}
+    journal_add([entry])
+    return jsonify({"ok": True})
+
+def S_num(v):
+    try: return f"{float(v):.5f}"
+    except Exception: return "?"
 
 @app.route("/api/oblast")
 def api_oblast():
