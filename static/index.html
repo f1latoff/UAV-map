@@ -75,9 +75,16 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 #toast{position:absolute;z-index:1700;left:50%;transform:translateX(-50%);top:8px;max-width:92%;background:#c00000;color:#fff;font-size:15px;font-weight:bold;padding:10px 14px;border-radius:10px;box-shadow:0 2px 12px #0008;display:none}
 .dark #mpp{background:#1b1f2a;color:#e6e6e6}.dark #mph{border-color:#333b4d}.dark #mph input[type=text]{background:#2a3040;color:#eee;border:1px solid #3a4256}
 .dark #mph button{background:#2a3040;color:#8ab4ff;border-color:#3a4256}.dark .mpi{border-color:#2d3446}.dark .mpi .n small{color:#99a}
+#fbp{position:fixed;z-index:1900;left:8px;right:8px;bottom:8px;max-height:80vh;overflow:auto;background:#fff;color:#222;border-radius:12px;padding:10px 12px;box-shadow:0 2px 16px #000a;display:none;flex-direction:column;font-size:14px}
+#fbp .mt{display:flex;justify-content:space-between;margin-bottom:6px;font-size:16px}#fbp input[type=text]{width:100%;box-sizing:border-box;padding:8px;font-size:15px;margin-top:6px}
+#fbp button,.fb,.fbm{padding:7px 11px;font-size:14px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}.fbw{margin-top:5px}.fbm{padding:3px 8px}
+.dark #fbp{background:#1b1f2a;color:#e6e6e6}.dark #fbp input[type=text]{background:#2a3040;color:#eee;border:1px solid #3a4256}
 </style></head>
 <body><div id="bar"><div id="bt">Загрузка…</div><button id="rf" type="button" aria-label="Обновить"><span>🔄</span></button></div>
-<div id="wrap"><div id="map"></div><div id="tint"></div><div id="toast"></div><div id="pwa"></div>
+<div id="wrap"><div id="map"></div><div id="tint"></div><div id="toast"></div>
+<div id="fbp"><div class="mt"><b>❌ Что не так?</b><a href="#" id="fbc" style="text-decoration:none">✕</a></div><div id="fbs" class="small"></div><div id="fbr"></div>
+<input type="text" id="fbm" placeholder="Комментарий (по желанию)" autocomplete="off"><div style="margin-top:6px"><button id="fbpick">📍 Показать правильное место</button> <span class="small" id="fbpt"></span></div>
+<div style="margin-top:8px"><button id="fbsend" style="font-weight:bold">Отправить в журнал</button> <button id="fbcancel">Отмена</button></div></div><div id="pwa"></div>
 <div id="about"><div class="ab"><button class="abx" id="abx" aria-label="Закрыть">×</button>
 <h2>О проекте «БПЛА 31»</h2>
 <p>Неофициальная карта оповещений о БПЛА и ракетной опасности по Белгородской области. Информация собирается автоматически из открытых Telegram-каналов и показывается на карте.</p>
@@ -214,12 +221,13 @@ $('bme').onclick=()=>{
 // лента
 const feedItems=()=>{const nq=norm(query);return(D?D.feed:[]).filter(f=>(!onlyFresh||f.age<15)&&(!nq||norm(f.text).includes(nq)))};
 function renderFeed(){const it=feedItems(),l=$('list');
-  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':f.level==='danger'?'🟨':'🟥'}<br>${esc(f.text)}</div>`).join('')||`<div style="padding:14px 4px;color:#888">${query||onlyFresh?'Ничего не найдено.':'Сейчас нет сообщений об оповещениях. Здесь показываются свежие сообщения каналов.'}</div>`;
-  l.querySelectorAll('.fi').forEach(e=>e.onclick=()=>{const f=it[+e.dataset.i];if(f.lat!=null){map.flyTo([f.lat,f.lon],12);if(innerWidth<700)panel.style.display='none'}})}
+  l.innerHTML=it.map((f,i)=>`<div class="fi" data-i="${i}"><b>${esc(f.time)}</b> · ${f.age} мин · <i>${esc(f.ch)}</i> ${f.kind.includes('clear')?'🟢':f.kind.startsWith('rocket')?'🔴':f.level==='danger'?'🟨':'🟥'}<br>${esc(f.text)}${TK?fbMsgHtml(f,i):''}</div>`).join('')||`<div style="padding:14px 4px;color:#888">${query||onlyFresh?'Ничего не найдено.':'Сейчас нет сообщений об оповещениях. Здесь показываются свежие сообщения каналов.'}</div>`;
+  l.querySelectorAll('.fi').forEach(e=>e.onclick=()=>{const f=it[+e.dataset.i];if(f.lat!=null){map.flyTo([f.lat,f.lon],12);if(innerWidth<700)panel.style.display='none'}});
+  if(TK)l.querySelectorAll('.fbm').forEach(b=>b.onclick=ev=>{ev.stopPropagation();fbMsgAct(b.dataset.act,it[+b.dataset.i])})}
 // карта
 function updRoutes(){const k=156543.03392*Math.cos(50.6*Math.PI/180)/Math.pow(2,map.getZoom());routeLayers.forEach(l=>l.setStyle({weight:Math.max(5,l._m/k)}))}
 map.on('zoomend',updRoutes);
-function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLayers();routeLayers=[];
+function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLayers();routeLayers=[];FBZ={};
   if(d.oblast_poly){   // лёгкая заливка по границе области: БПЛА оранжевая с пунктиром, ракетная красная со сплошным контуром
     if(d.oblast_drone){const oc=d.oblast_drone.level==='danger'?'#ffc400':'#ff8800';L.geoJSON(d.oblast_poly,{interactive:false,style:{color:oc,weight:3,dashArray:'8 6',fillColor:oc,fillOpacity:.14}}).addTo(oblastLayer)}
     if(d.rocket&&d.rocket.oblast)L.geoJSON(d.oblast_poly,{interactive:false,style:{color:'#b00000',weight:3,fillColor:'#d00000',fillOpacity:.18}}).addTo(oblastLayer);}
@@ -230,9 +238,9 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
     if(R.city)(R.zones?R.zones.map(g=>L.geoJSON(g,{style:rs,pane:'zFill'})):[L.circle([50.5997,36.5983],{...rs,radius:25000})]).forEach(l=>l.bindPopup(pop).addTo(layer));
     R.places.forEach(m=>shape(m,rs).bindPopup(`<b>Ракетная опасность: ${esc(m.place)}</b><br>${esc(R.time)}`).addTo(layer))}
   const ms=d.markers.filter(m=>!onlyFresh||m.age<15);
-  ms.forEach(m=>{const fr=m.age<15,PAL={a:{alarm:'#e00000',danger:'#ffc400'},p:{alarm:'#a020f0',danger:'#c9a0ff'}},
+  ms.forEach((m,mi)=>{const fr=m.age<15,PAL={a:{alarm:'#e00000',danger:'#ffc400'},p:{alarm:'#a020f0',danger:'#c9a0ff'}},
       col=PAL[m.pt?'p':'a'][m.level||'alarm'],fp=fr?(m.pt?'zPoint':'zFill'):(m.pt?'zPointOld':'zFillOld'),lv=m.level==='danger'?'опасность':'тревога';
-    const pop=`<b>${esc(m.place)}</b> (${lv})<br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}`;
+    const pop=`<b>${esc(m.place)}</b> (${lv})<br>${esc(m.time)} (${m.age} мин назад)<br>Источников: ${m.n}<br>${esc(m.text)}${TK?fbHtml(m,mi):''}`;
     if(m.kind==='route'&&!m.poly){const o={lineCap:'round',lineJoin:'round',opacity:1};
       const a=L.polyline(m.pts,{...o,color:col,weight:10,pane:'zMargin',interactive:false}).addTo(layer);a._m=m.w_out;
       const b=L.polyline(m.pts,{...o,color:col,weight:8,pane:fp}).bindPopup(pop).addTo(layer);b._m=m.w_in;
@@ -255,13 +263,14 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
     disclaimer:'Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.'};setBar();
   updRoutes();renderFeed();renderMe();mpRefresh();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
 async function refresh(force){
-  try{D=await (await fetch('/api/markers'+(force===true?'?force=1':''))).json();redraw()}
+  try{const q=[];if(TK)q.push('key='+encodeURIComponent(TK),'trace=1');if(force===true)q.push('force=1');
+    D=await (await fetch('/api/markers'+(q.length?'?'+q.join('&'):''))).json();
+    if(TK&&(popOpen||fbCtx||fbPick))redrawLater=true;else redraw();if(TK&&D.trace)liveExplain()}
   catch(e){$('bt').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
 const TK=new URLSearchParams(location.search).get('test');
 $('rf').onclick=async()=>{const b=$('rf');if(b.disabled||TK)return;   // в режиме проверки кнопка видна (чтобы оценить вид), но ничего не делает
   b.disabled=true;b.classList.add('spin');const t0=Date.now();   // кнопка 🔄: сервер сразу перечитывает каналы
   await refresh(true);const w=700-(Date.now()-t0);if(w>0)await new Promise(r=>setTimeout(r,w));b.classList.remove('spin');b.disabled=false};
-if(TK){testMode(TK)}else{refresh();setInterval(refresh,15000)}
 // ----- верхняя полоса: по умолчанию показывает всё, касанием сворачивается до главного -----
 let barCollapsed=false,lastBar=null;try{barCollapsed=localStorage.getItem('barc')==='1'}catch(e){}
 // <BAR-PURE>
@@ -301,12 +310,13 @@ function testMode(key){
   document.title='Проверка разбора';
   const b=document.createElement('div'),K=encodeURIComponent(key),LK=(u,t)=>'<a href="'+u+'" target="_blank" style="margin-right:10px;font-size:12px;white-space:nowrap">'+t+'</a>';
   b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px;max-height:75vh;overflow:auto';
-  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea>'
+  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются) <span id="fbst" class="small"></span><br><button id="tm1" style="padding:6px 10px">✍ Мой текст</button> <button id="tm2" style="padding:6px 10px">🌐 Реальная карта</button><br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea>'
     +'<button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <button id="tc" style="padding:8px 12px;font-size:14px">📋 Копировать разбор</button> <span id="ts"></span>'
     +'<div id="tx" style="margin-top:6px"></div><div style="margin-top:8px">'+LK('/api/status?key='+K,'Состояние')+LK('/api/archive?key='+K,'Архив')+LK('/api/journal?key='+K,'Журнал')+LK('/api/names?key='+K,'Карта названий')
     +LK('/api/warm?key='+K,'Прогреть память')+LK('/api/geocache','Скачать места')+LK('/api/bundle?key='+K,'⬇ Всё для Claude')+'</div>';
   document.body.appendChild(b);
-  $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
+  $('tm1').onclick=()=>setMode('text');$('tm2').onclick=()=>setMode('live');
+  $('tg').onclick=async()=>{setMode('text',true);$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
       if(!r.ok){$('ts').textContent='нет доступа (проверьте пароль в адресе)';return}
       D=await r.json();first=true;redraw();lastExplain=explainText(D);$('tx').innerHTML=explainHTML(D);
@@ -316,8 +326,58 @@ function testMode(key){
     try{await navigator.clipboard.writeText(t);$('ts').textContent='скопировано, вставьте в чат'}
     catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();
       try{document.execCommand('copy');$('ts').textContent='скопировано, вставьте в чат'}catch(x){$('ts').textContent='не удалось скопировать'}a.remove()}};
-  const pt=new URLSearchParams(location.search).get('text');if(pt){$('tt').value=pt;setTimeout(()=>$('tg').click(),50)}}   // ссылка «Разобрать по шагам» из журнала и архива
+  const pt=new URLSearchParams(location.search).get('text');setMode('text',true);fbUpdate();
+  if(new URLSearchParams(location.search).get('live')==='1')setMode('live');else if(pt){$('tt').value=pt;setTimeout(()=>$('tg').click(),50)}}   // ссылка «Разобрать по шагам» из журнала и архива
 
+// ----- режимы проверки: свой текст или реальная карта -----
+let tmode='text',liveTimer=null;
+function setMode(m,quiet){tmode=m;clearInterval(liveTimer);liveTimer=null;
+  if($('tm1')){$('tm1').style.fontWeight=m==='text'?'bold':'normal';$('tm2').style.fontWeight=m==='live'?'bold':'normal'}
+  if(m==='live'){if($('ts'))$('ts').textContent='реальная карта: данные сайта, обновляются каждые 15 секунд';refresh();liveTimer=setInterval(refresh,15000)}
+  else if(!quiet&&$('ts'))$('ts').textContent='режим своего текста: нажмите «Показать на карте»'}
+function liveExplain(){const x=$('tx');if(!x||tmode!=='live')return;const was=x.querySelector('details')&&x.querySelector('details').open;
+  x.innerHTML='<details'+(was?' open':'')+'><summary>Разбор текущих сообщений ('+D.trace.length+')</summary>'+explainHTML(D)+'</details>';lastExplain=explainText(D)}
+// ----- отметки «верно / неверно»: только в режиме проверки; «неверно» уходит в журнал -----
+// <FB-PURE>
+const FB_ZONE_REASONS=['Место не там','Не то место (другое с таким названием)','Неверный цвет (тревога или опасность)','Такой зоны быть не должно','Другое'];
+const FB_MSG_REASONS=['Зоны нет, а должна быть','Зона лишняя: сообщение не про это','Зона не там','Неверный цвет','Другое'];
+function zoneKey(m){return 'z:'+m.place+'|'+(+m.lat).toFixed(4)+'|'+(+m.lon).toFixed(4)+'|'+m.time}
+function fbStats(V){let ok=0,bad=0;Object.keys(V).forEach(k=>{if(V[k]==='ok')ok++;else if(V[k]==='bad')bad++});const n=ok+bad;return{n,ok,bad,pct:n?Math.round(ok*100/n):0}}
+function fbPayload(c,live){const o=c.obj,base={reason:c.reason,comment:c.comment||'',source:live?'реальная карта':'вставленный текст',correct:c.correct||null};
+  return c.kind==='zone'?{...base,kind:'zone',place:o.place,level:o.level,zone_kind:o.kind,how:o.how||'',lat:o.lat,lon:o.lon,text:o.text,keys:o.keys||[],time:o.time,alts:o.alts||null,ch:((o.keys&&o.keys[0])||'').split(':')[0]}
+   :{...base,kind:'message',text:o.text,ch:o.ch,key:o.key,time:o.time,level:o.level,msgkind:o.kind}}
+// </FB-PURE>
+let FBV={},popOpen=false,redrawLater=false;try{FBV=JSON.parse(localStorage.getItem('fbv')||'{}')}catch(e){}
+map.on('popupopen',()=>{popOpen=true});map.on('popupclose',()=>{popOpen=false;if(redrawLater&&!fbCtx&&!fbPick){redrawLater=false;if(D)redraw()}});
+let FBZ={},fbCtx=null,fbPick=false,fbMark=null;
+const fbSave=()=>{try{localStorage.setItem('fbv',JSON.stringify(FBV))}catch(e){}};
+function fbUpdate(){const s=fbStats(FBV),e=$('fbst');if(e)e.textContent=s.n?'· проверено '+s.n+', верно '+s.ok+' ('+s.pct+'%), неверно '+s.bad:''}
+function fbState(k){const v=FBV[k];return v==='ok'?'<span style="color:#2e9e4f">✓ проверено: верно</span>':v==='bad'?'<span style="color:#c00">⚠ отмечено неверным</span>':''}
+function fbHtml(m,i){FBZ[i]=m;return'<div class="fbz" data-i="'+i+'" style="margin-top:6px;border-top:1px solid #ddd;padding-top:5px">'+fbState(zoneKey(m))+' <button class="fb" data-act="ok">✅ Верно</button> <button class="fb" data-act="bad">❌ Неверно</button></div>'}
+function fbMsgHtml(f,i){return'<div class="fbw">'+fbState('m:'+f.key)+' <button class="fbm" data-i="'+i+'" data-act="ok">✅ Верно</button> <button class="fbm" data-i="'+i+'" data-act="bad">❌ Неверно</button></div>'}
+function fbMsgAct(act,f){if(act==='ok'){FBV['m:'+f.key]='ok';fbSave();fbUpdate();renderFeed();toast('✓ Сообщение отмечено как разобранное верно','ok')}else fbOpen('message',f)}
+map.on('popupopen',e=>{const el=e.popup.getElement();if(!el||!TK)return;
+  el.querySelectorAll('.fbz .fb').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const m=FBZ[+b.closest('.fbz').dataset.i];
+    if(b.dataset.act==='ok'){FBV[zoneKey(m)]='ok';fbSave();fbUpdate();map.closePopup();toast('✓ Зона отмечена как верная','ok')}else fbOpen('zone',m)})});
+function fbOpen(kind,obj){fbCtx={kind,obj,reason:null,comment:'',correct:null};map.closePopup();
+  const R=kind==='zone'?FB_ZONE_REASONS:FB_MSG_REASONS;
+  $('fbs').innerHTML=kind==='zone'?'<b>Зона «'+esc(obj.place)+'»</b> · '+(obj.level==='danger'?'опасность':'тревога')+'<br><small>'+esc(obj.how||'')+'</small><br><small>'+esc(obj.text||'')+'</small>'
+    :'<b>Сообщение</b> от '+esc(obj.time)+' · '+esc(obj.ch)+'<br><small>'+esc(obj.text||'')+'</small>';
+  $('fbr').innerHTML=R.map((x,i)=>'<label style="display:block;padding:6px 0"><input type="radio" name="fbrs" value="'+i+'"> '+esc(x)+'</label>').join('');
+  $('fbr').querySelectorAll('input').forEach(r=>r.onchange=()=>{fbCtx.reason=R[+r.value]});
+  $('fbm').value='';$('fbpt').textContent='';$('fbp').style.display='flex';if(fbMark){map.removeLayer(fbMark);fbMark=null}}
+function fbClose(){$('fbp').style.display='none';fbPick=false;fbCtx=null;if(fbMark){map.removeLayer(fbMark);fbMark=null}if(redrawLater&&!popOpen){redrawLater=false;if(D)redraw()}}
+$('fbc').onclick=e=>{e.preventDefault();fbClose()};$('fbcancel').onclick=fbClose;
+$('fbpick').onclick=()=>{fbPick=true;$('fbp').style.display='none';toast('Коснитесь на карте правильного места','danger')};
+map.on('click',e=>{if(!fbPick||!fbCtx)return;fbPick=false;fbCtx.correct={lat:+e.latlng.lat.toFixed(5),lon:+e.latlng.lng.toFixed(5)};
+  if(fbMark)map.removeLayer(fbMark);fbMark=L.marker(e.latlng).addTo(map);$('toast').style.display='none';$('fbp').style.display='flex';
+  $('fbpt').textContent='Выбрано: '+fbCtx.correct.lat+', '+fbCtx.correct.lon});
+$('fbsend').onclick=async()=>{if(!fbCtx)return;if(!fbCtx.reason){$('fbpt').textContent='Выберите, что не так';return}
+  fbCtx.comment=$('fbm').value.trim();$('fbpt').textContent='отправляю…';
+  try{const r=await fetch('/api/feedback?key='+encodeURIComponent(TK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fbPayload(fbCtx,tmode==='live'))});
+    if(!r.ok){$('fbpt').textContent='не отправилось (код '+r.status+')';return}
+    FBV[fbCtx.kind==='zone'?zoneKey(fbCtx.obj):'m:'+fbCtx.obj.key]='bad';fbSave();fbUpdate();fbClose();if(D)redraw();renderFeed();toast('Записано в журнал','ok')}
+  catch(e){$('fbpt').textContent='нет связи с сервером'}};
 // ----- Мои места: состояние выбранных мест, звук и вибрация при ухудшении -----
 const RANK={none:0,danger:1,alarm:2,rocket:3};
 // <MP-PURE>
@@ -346,7 +406,7 @@ function beep(kind){if(!AC)return;const P={danger:[[520,.35]],alarm:[[880,.22],[
   let t=AC.currentTime+.02;P.forEach(([f,d])=>{const o=AC.createOscillator(),g=AC.createGain();o.type='square';o.frequency.value=f;
     g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.25,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d);
     o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+d+.02);t+=d+.06})}
-function toast(m,k){const t=$('toast');t.textContent=m;t.style.background=k==='danger'?'#b58900':'#c00000';t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.style.display='none'},9000)}
+function toast(m,k){const t=$('toast');t.textContent=m;t.style.background=k==='danger'?'#b58900':k==='ok'?'#2e7d32':'#c00000';t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.style.display='none'},9000)}
 $('toast').onclick=()=>{$('toast').style.display='none'};
 const mpLast={};
 function mpNotify(){if(TK||!D)return;let worst=null;
@@ -420,4 +480,6 @@ $('mpt').onclick=()=>{unlockAudio();setTimeout(()=>{beep('alarm');if(navigator.v
 })();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+// запуск: после всех объявлений выше (иначе режим проверки обращается к ещё не созданным переменным)
+if(TK){testMode(TK)}else{refresh();setInterval(refresh,15000)}
 </script></body></html>
