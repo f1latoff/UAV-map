@@ -79,9 +79,16 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 #fbp .mt{display:flex;justify-content:space-between;margin-bottom:6px;font-size:16px}#fbp input[type=text]{width:100%;box-sizing:border-box;padding:8px;font-size:15px;margin-top:6px}
 #fbp button,.fb,.fbm{padding:7px 11px;font-size:14px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}.fbw{margin-top:5px}.fbm{padding:3px 8px}
 .dark #fbp{background:#1b1f2a;color:#e6e6e6}.dark #fbp input[type=text]{background:#2a3040;color:#eee;border:1px solid #3a4256}
+#kp{position:fixed;inset:0;z-index:3000;background:#000b;display:none;align-items:center;justify-content:center}
+#kp .kb{background:#fff;color:#222;border-radius:12px;padding:16px;width:min(86vw,340px);box-shadow:0 4px 24px #000a}
+#kp input{width:100%;box-sizing:border-box;padding:10px;font-size:16px;margin-top:4px}#kp button{padding:9px 14px;font-size:15px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}
+.dark #kp .kb{background:#1b1f2a;color:#e6e6e6}.dark #kp input{background:#2a3040;color:#eee;border:1px solid #3a4256}
 </style></head>
 <body><div id="bar"><div id="bt">Загрузка…</div><button id="rf" type="button" aria-label="Обновить"><span>🔄</span></button></div>
 <div id="wrap"><div id="map"></div><div id="tint"></div><div id="toast"></div>
+<div id="kp"><div class="kb"><b style="font-size:18px">БПЛА 31 ТЕСТ</b><div class="small" style="margin:6px 0">Введите пароль режима проверки. Он сохранится только на этом устройстве.</div>
+<input type="password" id="kpi" autocomplete="off" placeholder="Пароль"><div id="kpe" class="small" style="color:#c00;min-height:18px"></div>
+<div><button id="kpb" style="font-weight:bold">Войти</button> <button id="kps">Пока без пароля</button></div></div></div>
 <div id="fbp"><div class="mt"><b>❌ Что не так?</b><a href="#" id="fbc" style="text-decoration:none">✕</a></div><div id="fbs" class="small"></div><div id="fbr"></div>
 <input type="text" id="fbm" placeholder="Комментарий (по желанию)" autocomplete="off"><div style="margin-top:6px"><button id="fbpick">📍 Показать правильное место</button> <span class="small" id="fbpt"></span></div>
 <div style="margin-top:8px"><button id="fbsend" style="font-weight:bold">Отправить в журнал</button> <button id="fbcancel">Отмена</button></div></div><div id="pwa"></div>
@@ -267,7 +274,17 @@ async function refresh(force){
     D=await (await fetch('/api/markers'+(q.length?'?'+q.join('&'):''))).json();
     if(TK&&(popOpen||fbCtx||fbPick))redrawLater=true;else redraw();if(TK&&D.trace)liveExplain()}
   catch(e){$('bt').innerHTML='<b style="color:#ffd54a">⚠ Нет связи с сервером. Данные на карте могут быть устаревшими.</b>'}}
-const TK=new URLSearchParams(location.search).get('test');
+const QS=new URLSearchParams(location.search),TESTAPP=location.pathname.replace(/\/+$/,'')==='/test';   // /test = тестовое приложение «БПЛА 31 ТЕСТ»
+const TK=(()=>{let k=QS.get('test');
+  if(TESTAPP){try{if(k){localStorage.setItem('tkey',k);QS.delete('test');history.replaceState(null,'',location.pathname+(QS.toString()?'?'+QS:''))}   // пароль запоминается на устройстве и пропадает из адресной строки
+    else k=localStorage.getItem('tkey')}catch(e){}}
+  return k||null})();
+if(TESTAPP&&!TK){const kp=$('kp');kp.style.display='flex';   // первый запуск: спрашиваем пароль один раз
+  $('kps').onclick=()=>{kp.style.display='none'};
+  const go=async()=>{const v=$('kpi').value.trim();if(!v)return;$('kpe').textContent='проверяю…';
+    try{const r=await fetch('/api/keycheck?key='+encodeURIComponent(v));if(r.ok){try{localStorage.setItem('tkey',v)}catch(e){}location.reload()}else $('kpe').textContent='Неверный пароль'}catch(e){$('kpe').textContent='Нет связи с сервером'}};
+  $('kpb').onclick=go;$('kpi').onkeydown=e=>{if(e.key==='Enter')go()}}
+if(TESTAPP&&TK)fetch('/api/keycheck?key='+encodeURIComponent(TK)).then(r=>{if(r.status===404){try{localStorage.removeItem('tkey')}catch(e){}location.reload()}}).catch(()=>{});   // пароль сменили: спросим заново
 $('rf').onclick=async()=>{const b=$('rf');if(b.disabled||TK)return;   // в режиме проверки кнопка видна (чтобы оценить вид), но ничего не делает
   b.disabled=true;b.classList.add('spin');const t0=Date.now();   // кнопка 🔄: сервер сразу перечитывает каналы
   await refresh(true);const w=700-(Date.now()-t0);if(w>0)await new Promise(r=>setTimeout(r,w));b.classList.remove('spin');b.disabled=false};
@@ -326,8 +343,8 @@ function testMode(key){
     try{await navigator.clipboard.writeText(t);$('ts').textContent='скопировано, вставьте в чат'}
     catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();
       try{document.execCommand('copy');$('ts').textContent='скопировано, вставьте в чат'}catch(x){$('ts').textContent='не удалось скопировать'}a.remove()}};
-  const pt=new URLSearchParams(location.search).get('text');setMode('text',true);fbUpdate();
-  if(new URLSearchParams(location.search).get('live')==='1')setMode('live');else if(pt){$('tt').value=pt;setTimeout(()=>$('tg').click(),50)}}   // ссылка «Разобрать по шагам» из журнала и архива
+  const pt=QS.get('text');setMode('text',true);fbUpdate();
+  if(QS.get('live')==='1'||(TESTAPP&&!pt))setMode('live');else if(pt){$('tt').value=pt;setTimeout(()=>$('tg').click(),50)}}   // в тестовом приложении сразу реальная карта   // ссылка «Разобрать по шагам» из журнала и архива
 
 // ----- режимы проверки: свой текст или реальная карта -----
 let tmode='text',liveTimer=null;
