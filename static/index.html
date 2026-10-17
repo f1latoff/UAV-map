@@ -18,8 +18,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>html{background:#222}
 body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh}
-#bar{flex:none;height:84px;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;display:flex;gap:8px;align-items:flex-start;overflow:hidden}
-#bt{flex:1;min-width:0;height:100%;overflow:auto}
+#bar{flex:none;min-height:56px;max-height:42vh;box-sizing:border-box;padding:6px 10px;font-size:13px;background:#222;color:#eee;display:flex;gap:8px;align-items:flex-start;overflow:hidden}
+#bt{flex:1;min-width:0;max-height:calc(42vh - 12px);overflow:auto;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.bx{color:#8ab4ff;white-space:nowrap;font-size:12px}
 #rf{flex:none;width:40px;height:40px;border-radius:50%;border:1px solid #666;background:#333;color:#fff;font-size:19px;line-height:1;padding:0;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 #rf:disabled{opacity:.6}#rf.spin span{display:inline-block;animation:rfspin .8s linear infinite}@keyframes rfspin{to{transform:rotate(360deg)}}
 #wrap{position:relative;flex:1;min-height:0}#map{height:100%}
@@ -56,7 +57,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 .dark #pwa{background:#1f2430;color:#e8e8e8}.dark #pwa .x{color:#aaa}
 .dark #about .ab{background:#1f2430;color:#e8e8e8}.dark #about .warn{background:#3a2d17}.dark #about a{color:#8ab4ff}
 .dark .small{color:#999}.dark #grip::after{background:#556}.dark #about .abx{color:#aaa}
-@supports (-webkit-touch-callout:none){#bar{padding-top:28px;height:98px}}
+@supports (-webkit-touch-callout:none){#bar{padding-top:28px}#bt{max-height:calc(42vh - 34px)}}
 .wx{background:#fff;border-radius:16px;padding:5px 11px;font-size:14px;line-height:1.3;box-shadow:0 1px 4px #0006;white-space:nowrap;pointer-events:none}
 .dark .wx{background:#1f2430;color:#e8e8e8}
 .leaflet-right .wx{margin-right:14px;margin-bottom:6px}
@@ -90,7 +91,7 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 <h3>Источники данных</h3>
 <p>Сообщения из открытых Telegram-каналов, права на них принадлежат авторам каналов. Места определяются по данным OpenStreetMap, карта © участники OpenStreetMap. Погода: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>.</p>
 <h3>Конфиденциальность</h3>
-<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет. Список «Моих мест» хранится только на вашем телефоне; на сервер уходит лишь название, которое вы вводите для поиска места. Погоду обычно получает наш сервер; если у него не вышло, ваш браузер запрашивает её у сервиса Open-Meteo сам, и тот при этом видит ваш IP-адрес.</p>
+<p>Сайт не требует регистрации. Кнопка «Где я» определяет ваше положение прямо в браузере и никуда его не отправляет. Сервер считает только число устройств, открывших сайт (по обезличенному хешу адреса, он держится в памяти и на диск не записывается). Список «Моих мест» хранится только на вашем телефоне; на сервер уходит лишь название, которое вы вводите для поиска места. Погоду обычно получает наш сервер; если у него не вышло, ваш браузер запрашивает её у сервиса Open-Meteo сам, и тот при этом видит ваш IP-адрес.</p>
 <h3>Установка как приложения</h3>
 <p>iPhone: в Safari нажмите «Поделиться» → «На экран “Домой”». Android: кнопка «Установить» в браузере.</p>
 <h3>Связь</h3>
@@ -98,8 +99,9 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 <p class="small">Проект предоставляется «как есть», без гарантий.</p></div></div>
 <div id="mpp"><div id="mph"><div class="mt"><b>⭐ Мои места</b><a href="#" id="mpc" style="text-decoration:none">✕ закрыть</a></div>
 <div class="row2"><input type="text" id="mpq" placeholder="Село, город или район" autocomplete="off"><button id="mpa">Добавить</button></div><div id="mpr" class="small"></div>
-<label style="display:block;margin-top:8px"><input type="checkbox" id="mps"> 🔔 Звук и вибрация, когда у моего места становится хуже</label>
-<div style="margin-top:4px"><button id="mpt">Проверить звук</button> <span class="small" id="mpn"></span></div></div><div id="mpl"></div></div>
+<label style="display:block;margin-top:8px"><input type="checkbox" id="mps"> 🔔 Сигнал при тревоге в моих местах</label>
+<div class="small" style="margin:2px 0 6px 24px">Работает, пока приложение открыто. На iPhone только звук, без вибрации.</div>
+<div><button id="mpt">▶ Проверить сигнал</button> <span class="small" id="mpn"></span></div></div><div id="mpl"></div></div>
 <div id="panel"><div id="grip" title="Развернуть / свернуть"></div><div id="ph"><input type="text" id="q" placeholder="Поиск по населённому пункту или тексту">
 <label><input type="checkbox" id="fr"> только свежие (до 15 мин)</label>
 <a href="#" id="pc" style="float:right;text-decoration:none">✕ закрыть</a></div><div id="list"></div></div></div>
@@ -247,9 +249,10 @@ function redraw(){if(!D)return;const d=D;layer.clearLayers();oblastLayer.clearLa
   let top=bad.length?`<b style="color:#ffd54a">⚠ Нет свежих данных: ${bad.map(s=>esc(s.ch)+(s.age===null?'':' ('+s.age+' мин назад)')).join(', ')}. Карта может быть неполной.</b><br>`:'';
   if(R)top+=`<b style="color:#ff6060">РАКЕТНАЯ ОПАСНОСТЬ с ${esc(R.time)} (МСК)${ro?': вся Белгородская область':''}.</b> `;
   if(d.oblast_drone)top+=`<b style="color:#ffaa44">${d.oblast_drone.level==='danger'?'Опасность':'Тревога'} по БПЛА на всей территории области (${esc(d.oblast_drone.time)}).</b> `;
-  $('bt').innerHTML=mpBar()+top+`Зон БПЛА: ${ms.length}. Обновлено ${esc(d.updated)}${d.fetch_age==null?'':' · каналы проверены '+(d.fetch_age<90?d.fetch_age+' с':Math.round(d.fetch_age/60)+' мин')+' назад'}. `+
-    (d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'')+
-    '<br>Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.';
+  lastBar={mp:mpBar(),top,count:ms.length,upd:esc(d.updated),updShort:esc(String(d.updated).slice(0,5)),
+    age:d.fetch_age==null?'':' · каналы проверены '+(d.fetch_age<90?d.fetch_age+' с':Math.round(d.fetch_age/60)+' мин')+' назад',
+    unknown:d.unknown.length?`Место не определено: ${d.unknown.map(u=>esc(u.place)).join('; ')}. `:'',
+    disclaimer:'Данные приблизительные, не официальный источник. Следуйте официальным оповещениям.'};setBar();
   updRoutes();renderFeed();renderMe();mpRefresh();if(d.weather)showWeather(d.weather);else{showWeather(wxLocal&&Date.now()-wxT<1.08e7?wxLocal:null);browserWeather()}}
 async function refresh(force){
   try{D=await (await fetch('/api/markers'+(force===true?'?force=1':''))).json();redraw()}
@@ -259,17 +262,61 @@ $('rf').onclick=async()=>{const b=$('rf');if(b.disabled||TK)return;   // в ре
   b.disabled=true;b.classList.add('spin');const t0=Date.now();   // кнопка 🔄: сервер сразу перечитывает каналы
   await refresh(true);const w=700-(Date.now()-t0);if(w>0)await new Promise(r=>setTimeout(r,w));b.classList.remove('spin');b.disabled=false};
 if(TK){testMode(TK)}else{refresh();setInterval(refresh,15000)}
+// ----- верхняя полоса: по умолчанию показывает всё, касанием сворачивается до главного -----
+let barCollapsed=false,lastBar=null;try{barCollapsed=localStorage.getItem('barc')==='1'}catch(e){}
+// <BAR-PURE>
+function barHtml(p,c){const head=p.mp+p.top;
+  return c?head+`Зон БПЛА: ${p.count} · ${p.updShort} <span class="bx">▾ подробнее</span>`
+    :head+`Зон БПЛА: ${p.count}. Обновлено ${p.upd}${p.age}. `+p.unknown+'<br>'+p.disclaimer+' <span class="bx">▴ свернуть</span>'}
+// </BAR-PURE>
+function setBar(){if(lastBar)$('bt').innerHTML=barHtml(lastBar,barCollapsed)}
+$('bt').onclick=e=>{if(e.target.closest&&e.target.closest('a'))return;barCollapsed=!barCollapsed;try{localStorage.setItem('barc',barCollapsed?'1':'0')}catch(x){}setBar()};
+if(window.ResizeObserver)new ResizeObserver(()=>map.invalidateSize()).observe($('bar'));   // карта подстраивается под высоту полосы
+// ----- разбор сообщений по шагам (режим проверки) -----
+// <TRACE-PURE>
+const KINDN={alert:'оповещение о БПЛА',clear:'отбой',downgrade:'снижение тревоги до опасности',rocket:'ракетная опасность',rocket_clear:'отбой ракетной опасности'};
+const LVN={alarm:'тревога (красный)',danger:'опасность (жёлтый)'};
+function traceLines(t){const L=[];
+  L.push('Вид: '+(t.kind?(KINDN[t.kind]||t.kind)+(t.level?', '+LVN[t.level]:''):'не оповещение'+(t.skip?' ('+t.skip+')':'')));
+  if(t.kind&&t.skip)L.push('Не использовано: '+t.skip);
+  if(t.norm)L.push('После исправления опечаток: '+t.norm.replace(/\s+/g,' '));
+  if(t.places&&t.places.length)L.push('Названия мест: '+t.places.join('; '));
+  if(t.routes&&t.routes.length)L.push('Участки: '+t.routes.join('; '));
+  (t.drawn||[]).forEach(d=>L.push('• '+d.place+' → '+d.how+', '+(d.level==='danger'?'опасность':'тревога')+
+    (d.alts&&d.alts.length?'. Варианты в карте: '+d.alts.map(a=>(a.chosen?'★ ':'')+a.km+' км от центра, '+(a.nt||'?')+(a.dn?' «'+a.dn+'»':'')+', важность '+a.imp).join(' | '):'')+
+    (d.drop&&d.drop.length?' (отброшено: '+d.drop.map(x=>(x.nt||'?')+' '+x.km+' км').join(', ')+')':'')));
+  if(t.unknown&&t.unknown.length)L.push('Не найдено на карте: '+t.unknown.join('; '));
+  if(t.cleared&&t.cleared.length)L.push('Снято зон: '+t.cleared.join('; '));
+  (t.notes||[]).forEach(n=>L.push(n));
+  return L}
+function explainText(Dd){const T=Dd.trace||[],L=[];
+  T.forEach((t,i)=>{L.push('Сообщение '+(i+1)+': «'+String(t.text).replace(/\s+/g,' ')+'»');traceLines(t).forEach(x=>L.push('  '+x));L.push('')});
+  L.push('Итого: зон БПЛА '+(Dd.markers||[]).length+(Dd.oblast_drone?'; '+(Dd.oblast_drone.level==='danger'?'опасность':'тревога')+' по всей области':'')+(Dd.rocket?'; ракетная опасность':'')+((Dd.unknown||[]).length?'; не найдено: '+Dd.unknown.map(u=>u.place).join(', '):''));
+  return L.join('\n')}
+// </TRACE-PURE>
+function explainHTML(Dd){return(Dd.trace||[]).map((t,i)=>'<div style="border-left:4px solid '+(t.kind?(t.kind==='alert'&&t.level==='alarm'?'#d33':t.kind==='alert'?'#cc9a00':String(t.kind).includes('clear')?'#2e9e4f':'#b00000'):'#999')+
+  ';background:#f4f4f4;margin:5px 0;padding:5px 8px;border-radius:4px"><b>Сообщение '+(i+1)+'</b>: «'+esc(String(t.text).replace(/\s+/g,' '))+'»<br>'+traceLines(t).map(esc).join('<br>')+'</div>').join('')}
+let lastExplain='';
 function testMode(key){
   document.title='Проверка разбора';
-  const b=document.createElement('div');
-  b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px';
-  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea><button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <a href="/api/warm?key='+encodeURIComponent(key)+'" target="_blank" style="margin-left:8px;font-size:12px">Прогреть память</a> <a href="/api/geocache" style="margin:0 8px;font-size:12px">Скачать найденные места</a> <a href="/api/journal?key='+encodeURIComponent(key)+'" target="_blank" style="font-size:12px">Журнал</a><span id="ts"></span>';
+  const b=document.createElement('div'),K=encodeURIComponent(key),LK=(u,t)=>'<a href="'+u+'" target="_blank" style="margin-right:10px;font-size:12px;white-space:nowrap">'+t+'</a>';
+  b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px;max-height:75vh;overflow:auto';
+  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются)<br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea>'
+    +'<button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <button id="tc" style="padding:8px 12px;font-size:14px">📋 Копировать разбор</button> <span id="ts"></span>'
+    +'<div id="tx" style="margin-top:6px"></div><div style="margin-top:8px">'+LK('/api/status?key='+K,'Состояние')+LK('/api/archive?key='+K,'Архив')+LK('/api/journal?key='+K,'Журнал')+LK('/api/names?key='+K,'Карта названий')
+    +LK('/api/warm?key='+K,'Прогреть память')+LK('/api/geocache','Скачать места')+LK('/api/bundle?key='+K,'⬇ Всё для Claude')+'</div>';
   document.body.appendChild(b);
   $('tg').onclick=async()=>{$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
       if(!r.ok){$('ts').textContent='нет доступа (проверьте пароль в адресе)';return}
-      D=await r.json();first=true;redraw();$('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')+(D.markers.some(m=>m.alts)?'. Варианты: '+D.markers.filter(m=>m.alts).map(m=>m.place+' → '+m.alts.map(a=>(a.chosen?'★':'')+a.km+' км от центра, '+(a.nt||'?')+', важность '+a.imp+(a.dn?' «'+a.dn+'»':'')).join(' | ')+(m.drop&&m.drop.length?' (отброшено: '+m.drop.map(d=>(d.nt||'?')+' '+d.km+' км').join(', ')+')':'')).join('; '):'')+(D.markers.some(m=>m.why)?'. Кругом, потому что: '+D.markers.filter(m=>m.why).map(m=>m.place+' — '+m.why).join('; '):'')}
-    catch(e){$('ts').textContent='ошибка'}}}
+      D=await r.json();first=true;redraw();lastExplain=explainText(D);$('tx').innerHTML=explainHTML(D);
+      $('ts').textContent='готово: зон '+D.markers.length+(D.unknown.length?', не найдено: '+D.unknown.map(u=>u.place).join('; '):'')}
+    catch(e){$('ts').textContent='ошибка'}};
+  $('tc').onclick=async()=>{const t=lastExplain||'(сначала нажмите «Показать на карте»)';
+    try{await navigator.clipboard.writeText(t);$('ts').textContent='скопировано, вставьте в чат'}
+    catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();
+      try{document.execCommand('copy');$('ts').textContent='скопировано, вставьте в чат'}catch(x){$('ts').textContent='не удалось скопировать'}a.remove()}};
+  const pt=new URLSearchParams(location.search).get('text');if(pt){$('tt').value=pt;setTimeout(()=>$('tg').click(),50)}}   // ссылка «Разобрать по шагам» из журнала и архива
 
 // ----- Мои места: состояние выбранных мест, звук и вибрация при ухудшении -----
 const RANK={none:0,danger:1,alarm:2,rocket:3};
@@ -333,7 +380,7 @@ $('mpc').onclick=e=>{e.preventDefault();mpp.style.display='none'};
 $('mpa').onclick=mpSearch;$('mpq').onkeydown=e=>{if(e.key==='Enter')mpSearch()};
 $('mps').onchange=e=>{MPsnd=e.target.checked;try{localStorage.setItem('mp1snd',MPsnd?'1':'0')}catch(x){}};
 $('mpt').onclick=()=>{unlockAudio();setTimeout(()=>{beep('alarm');if(navigator.vibrate)navigator.vibrate([300,150,300])},60);
-  $('mpn').textContent=navigator.vibrate?'':'На iPhone вибрация в браузере не работает, будет только звук. Звук не играет при выключенном экране или свёрнутом приложении.'};
+};
 // тема (Авто / Ночь / День) и окно «О проекте»
 (function(){
   const mq=matchMedia('(prefers-color-scheme: dark)'),bth=$('bth'),LAB={auto:'🌓 Авто',dark:'🌙 Ночь',light:'☀️ День'};
