@@ -9,6 +9,7 @@ TTL_MIN = int(os.getenv("TTL_MIN", "40"))            # через сколько
 ROCKET_TTL = int(os.getenv("ROCKET_TTL", "120"))     # то же для ракетной опасности
 REGION = os.getenv("REGION", "Белгородская область")
 VIEWBOX = os.getenv("VIEWBOX", "34.9,51.6,39.6,49.8")   # вся область (Алексеевка и Ровеньки лежат восточнее 38,5)
+CITY_VB = os.getenv("CITY_VIEWBOX", "36.40,50.70,36.78,50.50")   # город Белгород: улицы ищем только здесь
 LOCAL_VB = os.getenv("LOCAL_VIEWBOX", "36.0,51.0,37.2,50.2")   # окрестности Белгорода (около 45 км): одноимённые сёла ищем сначала здесь
 UA = "uav-map/1.0 (personal project)"
 MSK = timezone(timedelta(hours=3))  # московское время
@@ -16,7 +17,7 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
-BUILD = "пакет-2"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
+BUILD = "пакет-3"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
 START_TS = time.time()
 PERF = {"build_ms": 0, "calls": 0}
 SEEN = {}   # хеш адреса (только в памяти) -> когда обращался: сколько устройств пользуются сайтом
@@ -46,6 +47,7 @@ BUILTIN_PLACES = {   # закреплённые вручную названия:
     "титовк": [50.387554, 36.844877, 800, "село", "Титовка"],   # посёлок Титовка у Шебекино
     "устинк": [50.428216, 36.881933, 800, "село", "Устинка"],   # квартал Устинка (Шебекино)
     "зарубин": [50.43245, 36.53178, 700, "село", "Зарубино"],   # микрорайон Зарубино в Новой Нелидовке (не урочище)
+    "коровин": [50.37092, 36.75815, 500, "село"],   # хутор Коровино (Шебекинский округ) по точке владельца; границу из карты не берём
     "политотдельск": [50.473768, 36.409698, 1000, "село", "Политотдельский"],   # посёлок Политотдельский (Белгородский округ)
     "политодельск": [50.473768, 36.409698, 1000, "село", "Политотдельский"],    # то же с опечаткой в канале («Политодельский»)
     "заячий": [50.4114, 36.869707, 800, "село", "Заячий хутор"],     # квартал Заячий хутор (Шебекино)
@@ -95,10 +97,21 @@ def archive_add(trace):
 
 manual = {**BUILTIN_PLACES, **load_json("places.json", {})}
 outlines = load_json("outlines.json", {})   # контуры сёл, нарисованные вручную: {"дубовое": GeoJSON}
+DRAWFILE = "drawn.json"
+DRAWN = {k: v for k, v in load_json(DRAWFILE, {}).items() if isinstance(v, dict) and isinstance(v.get("points"), list)}   # нарисованное в тестовом приложении: действует сразу, до следующего обновления сайта
+
+def drawn_geom(item):
+    pts = [[round(lon, 6), round(lat, 6)] for lat, lon in item["points"]]
+    if item["type"] == "line": return {"type": "LineString", "coordinates": pts, "width": item["width"]}
+    return {"type": "Polygon", "coordinates": [pts + [pts[0]]]}
+
+for _k, _v in DRAWN.items():
+    try: outlines[_k] = drawn_geom(_v)
+    except Exception: pass
 
 STOP = r"пройти\s+в|заметьте|со\s+стороны|никому\s+не|не\s+пользоваться|оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|\bопасност\w* по бпла|тревог\w* по бпла|тревога|\bопасност\w*|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|\bчист(?:ое|о|ый|ая)\b|\bясн(?:ое|о|ый|ая)\b|\bбудьте\b|\bдержитесь\b|\bмест(?:о|а|у|е|ом|ах)?\b|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bспутник\w*|\bтыл\w*|\bдом(?:а|ов|ам|е)?\b|\bбез\b|\bтом\b|\bчисл\w*|\bмного\b|\bднр\b|\bлнр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|\bбезопасн\w*|\bвидео\b|\bпройти\b|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|\bчист(?:ое|о|ый|ая)\b|\bясн(?:ое|о|ый|ая)\b|\bбудьте\b|\bдержитесь\b|\bмест(?:о|а|у|е|ом|ах)?\b|\bдейству\w*|\bуважаем\w*|\bземляк\w*|\bсмотрим\b|\bзанимаем\w*|\bсохраняем\b|\bодного\b|\bодин\b|ваш\w*\s+направлен\w*|\bограничьт\w*|\bперемещени\w*|\bданн\w+\s+участк\w*|\bучасток\s+дороги|\bинформаци\w*|\bочень\b|\bситуативно\b|\bрсчс\b|\bэкстренн\w*|\bблизлежащ\w*\s+\w+|\bулицы\b|\bдорог(?:а|и|е|у|ой|ам|ах)?\b|\bуданоен\b|\bпо\s+возможности\b|\b(?:больш|высок)\w*\s+активност\w*|\bактивност\w*|\bоптоволокн\w*|\bдронов\b|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bспутник\w*|\bтыл\w*|\bдом(?:а|ов|ам|е)?\b|\bбез\b|\bтом\b|\bчисл\w*|\bмного\b|\bднр\b|\bлнр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|\bбезопасн\w*|\bвидео\b|\bпройти\b|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
 NEIGH = r"курск|воронеж|липецк|брянск|сумск|херсон|запорож|\bорёл\b|\bорел\b|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
@@ -110,6 +123,14 @@ ALIASES = [   # места, которые каналы называют по-с
     (re.compile(r"\bвокзал\w*", re.I), 50.5940, 36.6040, 800),                                           # железнодорожный вокзал Белгорода (примерно; «автовокзал» сюда не входит)
     (re.compile(r"^\W*юго-?запад\w*\W*$", re.I), 50.5735, 36.5522, 2000),                              # «Юго-Западный» = юго-западная часть города
     (re.compile(r"я\W+люблю\W+белгород", re.I), 50.526444, 36.519001, 400),                           # кольцо «Я люблю Белгород»
+    (re.compile(r"(?:дом\w*\s+)?правительств\w*", re.I), 50.596805, 36.587735, 250),                  # Дом правительства
+    (re.compile(r"\bтэц\b", re.I), 50.600205, 36.618719, 450),                                         # ТЭЦ
+    (re.compile(r"центральн\w*\s+рын\w+", re.I), 50.601932, 36.588487, 300),                           # Центральный рынок
+    (re.compile(r"\bродин[аыеуой]\b", re.I), 50.596204, 36.580269, 250),                               # «Родина»
+    (re.compile(r"\bберег(?:а|ов|ам|ах)\b", re.I), 50.592088, 36.618359, 350),                          # «Берега»
+    (re.compile(r"\bэнергомаш\w*", re.I), 50.602859, 36.579580, 400),                                   # Энергомаш
+    (re.compile(r"\bаквапарк\w*", re.I), 50.510761, 36.671917, 350),                                    # аквапарк
+    (re.compile(r"^\W*центр(?:а|е|у|ом)?\W*$", re.I), 50.596805, 36.587735, 600),                       # «центр» = Соборная площадь (точка у Дома правительства, он стоит на площади)
 ]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|подпишись|реклам|https?://|www\.|t\.me|max\.ru|rustore|приложени\w*|скачай|наши каналы|наш\w* канал|официальн\w+ канал"   # реклама и ссылки: тревогой не считаются
 BEL = re.compile(r"^белгород(а|е|у)?$|белгородск\w* район")
@@ -179,20 +200,22 @@ def classify(text):
     if re.search(r"пуск\w*\s+(?:с\s+)?самол[её]т|пуск\w*\s+ракет", low): return "rocket"   # «Пуски с самолёта противника»
     if ob and re.search(r"опасност\w*(?:\s+\w+)?\s+сохраня|\bно\s+опасност|сохраня\w*\s+опасност", low): return "downgrade"   # красное снимается, остаётся жёлтое
     if ob or calm or re.search(r"\bнебо\W{0,3}(?:чист|ясн)\w*|\b(?:чист|ясн)\w*\W{0,3}небо\b|можно продолжить|продолжить движение|миновала", low): return "clear"
-    if "внимание" in low or re.search(r"дрон|бпла|беспилот|в сторону|стоп движ|остановить движение|остановите движение", low): return "alert"
+    if "внимание" in low or re.search(r"дрон|бпла|беспилот|fpv|фпв|оптоволокн|в сторону|стоп движ|остановить движение|остановите движение", low): return "alert"
     return None
 
 def extract_places(text):
     """Названия мест: в каждом предложении берём часть до служебной фразы («займите укрытие», «находитесь в укрытии», «над вами…»)."""
     t = re.sub(r"^\s*(внимание|отбой)[,!.:\s]*", "", text, flags=re.I)
-    out = []
+    out = []; seen_stop = False
     for sent in re.split(r"(?<=[.!?])\s+|\n+", t):
+        if seen_stop and len(sent.split()) <= 3 and re.search(r"бпла|дрон|fpv|фпв|оптоволокн", sent, re.I): continue   # хвост вида «Над вами! Уданоен Бпла!»: это описание, а не место
+        if re.search(STOP, sent, re.I): seen_stop = True
         out += _places_in(re.split(STOP, sent, maxsplit=1, flags=re.I)[0], text)
     if out and re.match(r"(?:улица|ул\.)\s", out[0], re.I):   # «улица Корочанская, Волчанская, Студенческая»: все названия улицы
         out = [out[0]] + ["улица " + x if re.fullmatch(r"[А-ЯЁ][а-яё]+(?:ская|ная|ая|ой|ий)", x) else x for x in out[1:]]
     elif out and re.fullmatch(r"[А-ЯЁа-яё-]{4,}(?:ая|яя)\s+(?:улица|ул\.?)", out[0], re.I):   # «Никольская улица, Луговая, Отрадная»: следующие женские прилагательные тоже улицы
         out = [out[0]] + [x + " улица" if re.fullmatch(r"[А-ЯЁа-яё-]{5,}(?:ая|яя)", x) else x for x in out[1:]]
-    return out
+    return list(dict.fromkeys(out))   # одно и то же название дважды («Красный Октябрь… Фабрика: Красный Октябрь») — одно место
 
 def _places_in(head, text):
     out = []
@@ -242,6 +265,7 @@ def shape(r, q):
     d = _shape(r, q)
     d["nt"] = r.get("type", "")   # тип объекта в OpenStreetMap (для подсказок в режиме проверки)
     d["dn"] = ", ".join(r.get("display_name", "").split(", ")[:3])   # как место называется в карте
+    d["dd"] = r.get("display_name", "")                                # полное название (для отличия города от пригорода)
     return d
 
 def normalize(q):
@@ -351,24 +375,44 @@ def border_near(name, pt):
     near = [x for x in cands if x.get("poly") and dkm(x, pt) <= 3]
     return min(near, key=lambda x: dkm(x, pt))["poly"] if near else None
 
-STREET_A = re.compile(r"^(?:улиц\w*|ул\.?)\s+(.+)$", re.I)
-STREET_B = re.compile(r"^(.+?)\s+(?:улиц\w*|ул\.?)$", re.I)
+STREET_TYPES = r"улиц\w*|ул\.?|проспект\w*|просп\.?|пр-т\.?|переул\w*|пер\.?|бульвар\w*|проезд\w*|набережн\w*"
+STREET_A = re.compile(rf"^(?P<t>{STREET_TYPES})\s+(?P<n>\S.*)$", re.I)
+STREET_B = re.compile(rf"^(?P<n>\S.*?)\s+(?P<t>{STREET_TYPES})$", re.I)
+STREET_STRIP = re.compile(rf"(?<!\w)(?:{STREET_TYPES})(?!\w)", re.I)
+CITY_RE = re.compile(r"(?<![А-Яа-яЁё])Белгород(?![а-яё])")   # «Белгород», но не «Белгородский район»
+ADJ_END = re.compile(r"(?:ая|яя|ий|ый|ой|ое|ее|ие)$", re.I)
+
+def street_canon(t):
+    t = t.lower()
+    if t.startswith("ул"): return "улица"
+    if t.startswith(("проспект", "просп", "пр-т")): return "проспект"
+    if t.startswith("проезд"): return "проезд"
+    if t.startswith("пер"): return "переулок"
+    if t.startswith("бульвар"): return "бульвар"
+    if t.startswith("набереж"): return "набережная"
+    return "улица"
 
 def street_query(q):
-    """«Никольская улица» / «улица Луговая» или одиночное женское прилагательное («Луговая», «Отрадная»): это улица Белгорода. Возвращает (название, сказано ли слово «улица»)."""
-    q = q.strip()
-    m = STREET_A.match(q) or STREET_B.match(q)
-    if m: return m.group(1).strip() + " улица", True
-    if re.fullmatch(r"[А-ЯЁа-яё-]{5,}(?:ая|яя)", q): return q + " улица", False
-    return None, False
+    """«улица Макаренко» / «Сторожевая улица» / «проспект Славы» или одиночное женское прилагательное («Луговая»): (название без слова «улица», тип, сказано ли слово «улица»)."""
+    q = q.strip(); m = STREET_A.match(q) or STREET_B.match(q)
+    if m: return m.group("n").strip(), street_canon(m.group("t")), True
+    if re.fullmatch(r"[А-ЯЁа-яё-]{5,}(?:ая|яя)", q): return q, "улица", False
+    return None, None, False
 
-def street_candidates(street):
-    stem = street.split()[0][:5].lower()
-    got = nominatim(f"{street}, Белгород", street, vb=LOCAL_VB)
-    out = [x for x in got if "белгород" in (x.get("dn") or "").lower() and stem in (x.get("dn") or "").lower().split(",")[0]]
-    if not out: return []
-    x = min(out, key=lambda y: dkm(y, (CENTER["lat"], CENTER["lon"])))   # одноимённые улицы в других сёлах не нужны
-    return [{**x, "kind": "object", "r_in": 500, "r_out": 750, "poly": None, "nt": "улица", "imp": max(x.get("imp") or 0, .3)}]
+def street_variants(name, typ):
+    a, b = f"{name} {typ}", f"{typ} {name}"
+    return [a, b] if ADJ_END.search(name.split()[-1]) else [b, a]   # «Сторожевая улица», но «улица Макаренко», «проспект Славы»
+
+def street_candidates(name, typ):
+    """Улица города Белгорода по карте: пробуем оба порядка слов, берём только улицы самого города (не пригородов) и ближайшую к центру."""
+    stem = name.split()[0][:5].lower().replace("ё", "е")
+    for v in street_variants(name, typ):
+        out = [x for x in nominatim(f"{v}, Белгород", v, vb=CITY_VB)
+               if CITY_RE.search(x.get("dd") or x.get("dn") or "") and stem in (x.get("dn") or "").lower().replace("ё", "е").split(",")[0]]
+        if out:
+            x = min(out, key=lambda y: dkm(y, (CENTER["lat"], CENTER["lon"])))
+            return [{**x, "kind": "object", "r_in": 400, "r_out": 600, "poly": None, "nt": "улица", "imp": max(x.get("imp") or 0, .3)}]
+    return []
 
 def candidates(q):
     """Список вариантов места (до 5), лучший по важности первым."""
@@ -390,9 +434,9 @@ def candidates(q):
         if rx.search(q): return [{"lat": la, "lon": lo, "kind": "object", "r_in": rad, "r_out": round(rad * 1.5), "imp": 1, "nt": "задано в коде"}]
     if KM.search(q): return []   # километр трассы не ищем по карте: поиск вернул бы случайное место
     try:
-        st, explicit = street_query(q)
-        if st:
-            got = street_candidates(st)
+        sname, styp, explicit = street_query(q)
+        if sname:
+            got = street_candidates(sname, styp)
             if got or explicit: return got   # сказано «улица»: другого места не ищем; одиночное «Луговая» без улицы при неудаче ищется как село
         nq = normalize(q)
         sd = split_district(nq)
@@ -537,8 +581,15 @@ def fix_names(t):
     t = re.sub(r"\b[Рр]азумн\w+[,\s-]+71\b[,\s]*", "Разумное-71, ", t)   # «Разумная, 71 беловская» = микрорайон Разумное-71 и Беловское
     t = re.sub(r"\b[Бб]еловск(?:ая|ой|ие|ую)\b", "Беловское", t)
     t = re.sub(r"\b[Мм]аслов(?:ой|ую|ы|а|у)?,?\s+[Пп]ристан\w*", "Маслова Пристань", t)   # «Маслова, пристань» = одно название
-    t = re.sub(r"\b[Бб]атрацк\w+\s+дач\w*", "Батрацкая Дача", t)
-    t = re.sub(r"\b[Чч]еремашн(?:ое|ого|ом|ому|ым)\b", "Черемошное", t)
+    t = re.sub(r"\b[Бб]атрац\w*\s+[Дд]ач\w*", "Батрацкая Дача", t)
+    t = re.sub(r"\b[Чч]еремашн(?:ое|ого|ом|ому|ым|ой|ая|ую|ые)\b", "Черемошное", t)
+    t = re.sub(r"\b[Рр]ы?жав(?:ец|ца|цу|цем|це)\b", "Ржавец", t)
+    t = re.sub(r"\b[Сс]еверяков\w*", "Севрюково", t)
+    t = re.sub(r"\b[Нн]ово[яе]\s+[Нн]елидовк\w*", "Новая Нелидовка", t)
+    t = re.sub(r"\b[Сс]оломинск\w*\s+мост\w*", "Соломино", t)
+    t = re.sub(r"\bв\s+направлении\s+[А-ЯЁа-яё-]+(?:ого|ского)\s+района\b", " ", t, flags=re.I)   # «Шебекино в направлении Новооскольского района»
+    t = re.sub(r"(\w)\s+(станци[яи]\s)", r"\1, \2", t, flags=re.I)                                 # «отрадная станция Наумовка» = «отрадная, станция Наумовка»
+    t = re.sub(r"(?<![А-Яа-яЁё-])[Гг]ород(?![А-Яа-яЁё])(?!\s+[А-ЯЁ])", "Белгород", t)               # «Внимание, город!» = весь Белгород
     t = re.sub(r"\bясн(?:ое|ые|ая|ый)?,?\s+зор(?:и|ей|ям|ях)\b", "Ясные Зори", t, flags=re.I)   # «ясное, зори» / «ясные, зори» = Ясные Зори
     t = re.sub(r"\b[Сс]тарая,?\s+(?:и\s+)?[Нн]овая,?\s+[Нн]елидовк\w*", "Старая Нелидовка, Новая Нелидовка", t)
     t = re.sub(r"\b[Нн]овая,?\s+(?:и\s+)?[Сс]тарая,?\s+[Нн]елидовк\w*", "Новая Нелидовка, Старая Нелидовка", t)
@@ -736,6 +787,7 @@ def how_found(pos):
     if nt == "вручную": return "закреплено вручную" + (", граница из карты" if pos.get("poly") else " (круг)")
     if nt == "контур вручную": return "контур, нарисованный вручную (outlines.json)"
     if nt == "задано в коде": return "народное место, задано в коде"
+    if nt == "контур вручную (улица)": return "улица, нарисованная вручную (линия, ширина около " + str(round(pos.get("w_line") or 100)) + " м)"
     if nt == "улица": return f"улица в Белгороде, круг {round(pos.get('r_in') or 0)} м по точке из карты"
     if pos.get("poly"): return "граница из карты" if pos.get("kind") != "district" else "граница района из карты"
     if pos.get("kind") == "district": return "район кругом (границы нет)"
@@ -759,12 +811,37 @@ def case_forms(ph):
         opts.append(list(dict.fromkeys(o))[:6])
     return [" ".join(c) for c in itertools.product(*opts[:3])]
 
+def geo_width(g0, g):
+    """Ширина полосы для линии: из самой геометрии («width») или из свойств нарисованного объекта."""
+    props = (g0.get("properties") if g0.get("type") == "Feature" else (g0["features"][0].get("properties") if g0.get("type") == "FeatureCollection" and g0.get("features") else None)) or {}
+    try: return max(30.0, min(500.0, float(g.get("width") or props.get("width") or 100)))
+    except Exception: return 100.0
+
+def line_zone(g, w):
+    """Линия (улица) -> многоугольник-полоса шириной w метров и точки линии для центра."""
+    lines = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
+    polys, pts = [], []
+    for ln in lines:
+        p = [(c[1], c[0]) for c in ln]
+        if len(p) >= 2: polys.append(buffer_polygon(p, w / 2)["coordinates"]); pts += p
+    return ({"type": "MultiPolygon", "coordinates": polys} if len(polys) > 1 else {"type": "Polygon", "coordinates": polys[0]}) if polys else None, pts
+
 def manual_pos(name):
-    """Село из outlines.json (нарисованное вручную) по названию в любом падеже; даёт готовое место с контуром."""
+    """Контур из outlines.json (село или участок, нарисованный вручную; линия = улица с шириной) по названию в любом падеже; даёт готовое место с контуром."""
     forms = [f.lower() for f in case_forms(name) + case_forms(TYPEWORD.sub("", name))]
-    for k, g in outlines.items():
+    sforms = {re.sub(r"\s+", " ", STREET_STRIP.sub(" ", f)).strip() for f in forms}   # «улица Сторожевая» = «Сторожевая улица» = «Сторожевая»
+    for k, g0 in outlines.items():
+        g = norm_geo(g0)
+        if g.get("type") in ("LineString", "MultiLineString"):
+            kn = re.sub(r"\s+", " ", STREET_STRIP.sub(" ", k.lower())).strip()
+            if kn and kn in sforms:
+                w = geo_width(g0, g); poly, pts = line_zone(g, w)
+                if poly:
+                    pos = as_poly({"lat": sum(p[0] for p in pts) / len(pts), "lon": sum(p[1] for p in pts) / len(pts), "kind": "settlement", "r_in": 300, "r_out": 450, "imp": 1, "nt": "контур вручную (улица)"}, poly)
+                    pos["w_line"] = w
+                    return pos
+            continue
         if any(re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", f) for f in forms):
-            g = norm_geo(g)
             rings = [g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]
             pts = [p for r in rings for p in r]
             return as_poly({"lat": sum(p[1] for p in pts) / len(pts), "lon": sum(p[0] for p in pts) / len(pts), "kind": "settlement",
@@ -935,12 +1012,22 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 res = []
                 for pl in pls:
                     ws = pl.split()
-                    if len(ws) >= 2 and ws[0].lower() not in TYPEWORDS and not KM.search(pl) and not rc(pl) and all(len(w) > 3 and rc(w) for w in ws): res += ws
+                    if len(ws) >= 2 and ws[0].lower() not in TYPEWORDS and not KM.search(pl) and not rc(pl) and (all(len(w) > 3 and rc(w) for w in ws) or (len(ws) == 2 and len(ws[0]) > 3 and not ADJ_END.search(ws[0]) and rc(ws[0]))): res += ws
                     else: res.append(pl)
                 return res
             places = split_glued(places)
-            pk = {k: with_outline(v, k) for k, v in resolve(places, rc).items()}
+            isst = lambda pl: bool(STREET_A.match(pl) or STREET_B.match(pl))
+            pk = {k: with_outline(v, k) for k, v in resolve([p_ for p_ in places if not isst(p_)], rc).items()}
+            vill, skipped = None, set()
+            for pl in places:   # «Отрадное, улица Садовая»: улица в названном селе (не городе), зона села уже есть; нарисованная вручную улица важнее
+                if isst(pl):
+                    if vill is not None and not manual_pos(pl): skipped.add(pl)
+                elif pk.get(pl): vill = pk[pl] if dkm(pk[pl], (CENTER["lat"], CENTER["lon"])) > 3 else None
+            pk.update({k: with_outline(v, k) for k, v in resolve([p_ for p_ in places if isst(p_) and p_ not in skipped], rc).items()})
             for pl in places:
+                if pl in skipped:
+                    if cur is not None: cur["notes"].append(f"«{pl}»: улица в названном селе, отдельная зона не нужна")
+                    continue
                 pos = pk.get(pl)
                 if not pos:
                     if KM.search(pl) and any(pk.get(x) for x in places): continue   # километр уточняет найденное место рядом
@@ -983,8 +1070,8 @@ WMO = {0: ("☀️", "Ясно"), 1: ("🌤", "Малооблачно"), 2: ("�
 def weather():
     """Погода в Белгороде (Open-Meteo, без ключа); обновляется раз в 15 минут, при ошибке пробуем снова через минуту."""
     now = time.time()
-    if now - WX["t"] > 900:
-        WX["t"] = now - 840
+    if now - WX["t"] > 1800:
+        WX["t"] = now - 1740
         try:
             resp = requests.get("https://api.open-meteo.com/v1/forecast", headers={"User-Agent": UA}, timeout=6,
                 params={"latitude": CENTER["lat"], "longitude": CENTER["lon"], "current": "temperature_2m,weather_code,is_day",
@@ -996,6 +1083,7 @@ def weather():
             WX.update(t=now, ok=now, err=None, data={"temp": round(c["temperature_2m"]), "icon": icon, "label": label})
         except Exception as e:
             WX["err"] = f"{type(e).__name__}: {e}"[:200]
+            if "429" in WX["err"]: WX["t"] = now   # ограничение частоты: ждём полные полчаса
             print("weather error:", WX["err"])
     return WX["data"] if WX["data"] and now - WX["ok"] < 3 * 3600 else None   # старше 3 часов не показываем
 
@@ -1080,7 +1168,7 @@ def api_journal():
         r.headers["Content-Disposition"] = "attachment; filename=journal.txt"; return r
     q = lambda **kw: "?" + "&".join([f"key={key}"] + [f"{k}={v}" for k, v in kw.items()])
     cards = "".join(
-        f"<div style='border-left:5px solid {'#d33' if v.get('tag') == 'ошибка зоны' else '#f80' if v.get('tag') == 'места' else '#999'};background:#f6f6f6;margin:8px 0;padding:8px 10px;border-radius:4px'>"
+        f"<div style='border-left:5px solid {'#d33' if v.get('tag') == 'ошибка зоны' else '#2e9e4f' if v.get('tag') == 'нарисовано' else '#f80' if v.get('tag') == 'места' else '#999'};background:#f6f6f6;margin:8px 0;padding:8px 10px;border-radius:4px'>"
         f"<small>{datetime.fromtimestamp(v.get('ts', 0), MSK).strftime('%d.%m %H:%M')} · {_html.escape(v.get('ch', ''))} · {_html.escape(v.get('tag', ''))}</small><br>"
         f"<b>{_html.escape(v.get('reason', ''))}</b><br><span style='white-space:pre-wrap'>{_html.escape(v.get('text', ''))}</span><br>"
         f"{('<small style=white-space:pre-wrap;color:#444>' + _html.escape(v.get('detail', '')) + '</small><br>') if v.get('detail') else ''}"
@@ -1152,6 +1240,7 @@ def _status_html(key, probe):
            row(None, "Контуры, нарисованные вручную", f"{len(outlines)}: {_html.escape(', '.join(sorted(outlines)))}"),
            row(None, "Закреплённые места", f"{len(manual)}"),
            row(None, "Прогрев и карта названий", f"{'идёт: ' + str(WARM['done']) + ' из ' + str(WARM['total']) if WARM['running'] else 'не запущен' if not seen_n else 'готово'}; названий проверено: {seen_n}, найдено: {found}"),
+           row(None, "Нарисованные места", f"{len(DRAWN)}: " + _html.escape(", ".join(v.get("name", "") for v in DRAWN.values()) or "нет") + " (действуют сразу, в файл на GitHub не записаны)"),
            row(None, "Журнал", f"записей: {len(JOURNAL)}, из них отметок «неверно»: {sum(1 for v in JOURNAL.values() if v.get('tag') == 'ошибка зоны')}"),
            row(None, "Архив сообщений", f"{len(ARCHIVE)} сообщений" + (f", с {datetime.fromtimestamp(min(v['ts'] for v in ARCHIVE.values()), MSK).strftime('%d.%m %H:%M')}" if ARCHIVE else ""))]
     cfg = [row(None, "Каналы", _html.escape(", ".join(CHANNELS))), row(None, "Жизнь зоны БПЛА / ракетной опасности", f"{TTL_MIN} / {ROCKET_TTL} мин"), row(None, "Регион", _html.escape(REGION))]
@@ -1186,6 +1275,8 @@ def api_bundle():
     ar = sorted(ARCHIVE.values(), key=lambda v: v.get("ts", 0), reverse=True)[:200]
     out = [f"ОТЧЁТ САЙТА ДЛЯ CLAUDE · {datetime.now(MSK).strftime('%d.%m.%Y %H:%M:%S')} МСК", "", "=== СОСТОЯНИЕ САЙТА ===", _plain(_status_html(key, False)), "", f"=== ЖУРНАЛ: ЧТО САЙТ НЕ ПОНЯЛ ({len(jr)}) ==="]
     out += [_entry_text(v) + "\n" for v in jr] or ["(пусто)"]
+    out += ["", f"=== НАРИСОВАННЫЕ МЕСТА ({len(DRAWN)}): действуют сразу, чтобы закрепить навсегда, их добавляют в outlines.json ==="]
+    out += [json.dumps({k: {"type": "Feature", "properties": {"name": v["name"], **({"width": v["width"]} if v["type"] == "line" else {})}, "geometry": drawn_geom(v)}}, ensure_ascii=False) for k, v in DRAWN.items()] or ["(нет)"]
     out += ["", f"=== АРХИВ: ПОСЛЕДНИЕ {len(ar)} СООБЩЕНИЙ И КАК САЙТ ИХ ПОНЯЛ ==="]
     for v in ar:
         extra = [x for x in (("места: " + "; ".join(v["places"])) if v.get("places") else "", ("не найдено: " + "; ".join(v["unknown"])) if v.get("unknown") else "", ("нарисовано: " + "; ".join(v["drawn"])) if v.get("drawn") else "",
@@ -1311,6 +1402,66 @@ def test_manifest():
          "icons": [{"src": "/static/test-icon-192.png", "sizes": "192x192", "type": "image/png"}, {"src": "/static/test-icon-512.png", "sizes": "512x512", "type": "image/png"},
                    {"src": "/static/test-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}
     return Response(json.dumps(m, ensure_ascii=False), mimetype="application/manifest+json")
+
+@app.route("/api/draw", methods=["GET", "POST"])
+def api_draw():
+    """Рисование мест в тестовом приложении: линия (улица) с шириной или многоугольник. Действует сразу; в отчёт «Всё для Claude» попадает для постоянного закрепления. Только с паролем."""
+    if not key_ok(): return ("", 404)
+    if request.method == "GET":
+        return jsonify([{"name": v.get("name"), "type": v.get("type"), "width": v.get("width"), "n": len(v.get("points", [])), "ts": v.get("ts")} for v in DRAWN.values()])
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict): return jsonify({"error": "нужен JSON"}), 400
+    if d.get("delete"):
+        k = str(d["delete"]).strip().lower()
+        if k not in DRAWN: return jsonify({"ok": False, "error": "такого нет"}), 404
+        del DRAWN[k]; outlines.pop(k, None); save_json(DRAWFILE, DRAWN)
+        return jsonify({"ok": True})
+    name = str(d.get("name") or "").strip()[:60]; typ = "line" if d.get("type") == "line" else "area"
+    pts = d.get("points")
+    if len(name) < 2: return jsonify({"error": "введите название (от 2 букв)"}), 400
+    try:
+        pts = [[float(a), float(b)] for a, b in pts]
+        assert all(49 < a < 52.5 and 34 < b < 40 for a, b in pts) and len(pts) <= 300 and len(pts) >= (2 if typ == "line" else 3)
+    except Exception:
+        return jsonify({"error": "нужно не меньше " + ("2 точек" if typ == "line" else "3 точек") + " внутри области"}), 400
+    try: width = max(30.0, min(500.0, float(d.get("width") or 100)))
+    except Exception: width = 100.0
+    key = name.lower()
+    item = {"name": name, "type": typ, "width": width, "points": pts, "ts": time.time()}
+    DRAWN[key] = item; outlines[key] = drawn_geom(item); save_json(DRAWFILE, DRAWN)
+    feat = {"type": "Feature", "properties": {"name": name, **({"width": width} if typ == "line" else {})}, "geometry": drawn_geom(item)}
+    journal_add([{"key": f"dr:{int(time.time() * 1000)}", "ch": "рисование", "ts": time.time(), "tag": "нарисовано", "text": "",
+                  "reason": f"нарисовано «{name}»: " + (f"линия, ширина {int(width)} м" if typ == "line" else "многоугольник"), "detail": json.dumps(feat, ensure_ascii=False)}])
+    return jsonify({"ok": True, "name": name})
+
+@app.route("/api/geosearch")
+def api_geosearch():
+    """«Поиск в карте» для режима проверки: что именно отвечает карта на название и что выберет сайт. Только с паролем."""
+    if not key_ok(): return ("", 404)
+    q = (request.args.get("q") or "").strip()[:80]
+    if len(q) < 2: return jsonify({"error": "слишком короткий запрос"}), 400
+    out = {"query": q, "raw": [], "error": None}
+    try:
+        with NOM_LOCK:
+            r = requests.get("https://nominatim.openstreetmap.org/search", headers={"User-Agent": UA}, timeout=15,
+                             params={"q": f"{q}, {REGION}", "format": "json", "limit": 10, "viewbox": VIEWBOX, "bounded": 1})
+            time.sleep(1.1)
+        for x in r.json():
+            out["raw"].append({"name": x.get("display_name", "").split(",")[0], "class": x.get("class"), "type": x.get("type"), "importance": round(float(x.get("importance") or 0), 3),
+                               "lat": x.get("lat"), "lon": x.get("lon"), "km": round(dkm({"lat": float(x["lat"]), "lon": float(x["lon"])}, (CENTER["lat"], CENTER["lon"])), 1), "display": x.get("display_name")})
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {str(e)[:150]}"
+    sname, styp, explicit = street_query(q)
+    out["street"] = {"name": sname, "type": styp, "explicit": explicit, "variants": street_variants(sname, styp)} if sname else None
+    mp = None
+    try: mp = manual_pos(q)
+    except Exception: pass
+    out["drawn_or_outline"] = bool(mp)
+    try:
+        out["choice"] = [{"how": how_found(x), "kind": x.get("kind"), "dn": x.get("dn"), "lat": round(x["lat"], 5), "lon": round(x["lon"], 5), "km": round(dkm(x, (CENTER["lat"], CENTER["lon"])), 1)} for x in candidates(q)[:5]]
+    except Exception as e:
+        out["choice"] = []; out["error"] = (out["error"] or "") + f" | выбор: {type(e).__name__}: {str(e)[:100]}"
+    return jsonify(out)
 
 @app.route("/api/oblast")
 def api_oblast():
