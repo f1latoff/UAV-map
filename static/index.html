@@ -83,9 +83,21 @@ body{margin:0;font-family:sans-serif;display:flex;flex-direction:column;height:1
 #kp .kb{background:#fff;color:#222;border-radius:12px;padding:16px;width:min(86vw,340px);box-shadow:0 4px 24px #000a}
 #kp input{width:100%;box-sizing:border-box;padding:10px;font-size:16px;margin-top:4px}#kp button{padding:9px 14px;font-size:15px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}
 .dark #kp .kb{background:#1b1f2a;color:#e6e6e6}.dark #kp input{background:#2a3040;color:#eee;border:1px solid #3a4256}
+#dp,#gs{position:fixed;z-index:1950;left:8px;right:8px;bottom:8px;max-height:62vh;overflow:auto;background:#fff;color:#222;border-radius:12px;padding:8px 10px;box-shadow:0 2px 16px #000a;display:none;flex-direction:column;font-size:14px}
+#dp .dh{display:flex;gap:6px;align-items:center;flex-wrap:wrap}#dp button,#gs button{padding:7px 11px;font-size:14px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}
+#dp input[type=text],#gs input[type=text]{width:100%;box-sizing:border-box;padding:8px;font-size:15px;margin:4px 0}#gso{white-space:pre-wrap;font-size:13px;margin-top:6px;line-height:1.4}
+.drawing .leaflet-interactive{pointer-events:none!important}
+.dark #dp,.dark #gs{background:#1b1f2a;color:#e6e6e6}.dark #dp input,.dark #gs input{background:#2a3040;color:#eee;border:1px solid #3a4256}.dark #dp button,.dark #gs button{background:#2a3040;color:#8ab4ff;border-color:#3a4256}
 </style></head>
 <body><div id="bar"><div id="bt">Загрузка…</div><button id="rf" type="button" aria-label="Обновить"><span>🔄</span></button></div>
 <div id="wrap"><div id="map"></div><div id="tint"></div><div id="toast"></div>
+<div id="dp"><div class="dh"><b>✏️ Нарисовать</b> <span class="small" id="dpi">точек: 0</span><span style="flex:1"></span><button id="dpu" title="Убрать последнюю точку">↩</button><button id="dpx" title="Очистить">🗑</button><button id="dps" style="font-weight:bold">✔ Сохранить</button><a href="#" id="dpc" style="text-decoration:none;font-size:18px">✕</a></div>
+<div id="dpb"><input type="text" id="dpn" placeholder="Название, например: улица Сторожевая" autocomplete="off">
+<div style="margin:4px 0"><label><input type="radio" name="dpt" value="line" checked> улица или участок (линия)</label><br><label><input type="radio" name="dpt" value="area"> район или объект (многоугольник)</label></div>
+<div id="dpw">Ширина полосы, м: <input type="number" id="dpwv" value="100" min="30" max="500" step="10" style="width:80px;padding:6px;font-size:15px"></div>
+<div class="small" style="margin:4px 0">Касайтесь карты по порядку вдоль улицы (или по границе района), приближайте карту для точности. Нарисованное работает сразу; чтобы осталось насовсем, пришлите мне отчёт «Всё для Claude».</div><div id="dpl" class="small"></div></div></div>
+<div id="gs"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><b>🔎 Поиск в карте</b><a href="#" id="gsx" style="text-decoration:none;font-size:18px">✕</a></div>
+<input type="text" id="gsq" placeholder="Название, например: улица Сторожевая" autocomplete="off"><div><button id="gsb" style="font-weight:bold">Найти</button> <button id="gsc">📋 Копировать</button> <span class="small" id="gss"></span></div><div id="gso"></div></div>
 <div id="kp"><div class="kb"><b style="font-size:18px">БПЛА 31 ТЕСТ</b><div class="small" style="margin:6px 0">Введите пароль режима проверки. Он сохранится только на этом устройстве.</div>
 <input type="password" id="kpi" autocomplete="off" placeholder="Пароль"><div id="kpe" class="small" style="color:#c00;min-height:18px"></div>
 <div><button id="kpb" style="font-weight:bold">Войти</button> <button id="kps">Пока без пароля</button></div></div></div>
@@ -327,12 +339,12 @@ function testMode(key){
   document.title='Проверка разбора';
   const b=document.createElement('div'),K=encodeURIComponent(key),LK=(u,t)=>'<a href="'+u+'" target="_blank" style="margin-right:10px;font-size:12px;white-space:nowrap">'+t+'</a>';
   b.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:1600;background:#fff;color:#222;border-radius:10px;padding:8px;box-shadow:0 2px 12px #0008;font-size:13px;max-height:75vh;overflow:auto';
-  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются) <span id="fbst" class="small"></span><br><button id="tm1" style="padding:6px 10px">✍ Мой текст</button> <button id="tm2" style="padding:6px 10px">🌐 Реальная карта</button><br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea>'
+  b.innerHTML='<b>Режим проверки</b> (данные сайта не меняются) <span id="fbst" class="small"></span><br><button id="tm1" style="padding:6px 10px">✍ Мой текст</button> <button id="tm2" style="padding:6px 10px">🌐 Реальная карта</button> <button id="tdw" style="padding:6px 10px">✏️ Нарисовать место</button> <button id="tgs" style="padding:6px 10px">🔎 Поиск в карте</button><br><textarea id="tt" rows="4" style="width:100%;box-sizing:border-box;margin:4px 0;font-size:14px" placeholder="Вставьте текст сообщения. Несколько сообщений разделяйте строкой ---"></textarea>'
     +'<button id="tg" style="padding:8px 12px;font-size:14px">Показать на карте</button> <button id="tc" style="padding:8px 12px;font-size:14px">📋 Копировать разбор</button> <span id="ts"></span>'
     +'<div id="tx" style="margin-top:6px"></div><div style="margin-top:8px">'+LK('/api/status?key='+K,'Состояние')+LK('/api/archive?key='+K,'Архив')+LK('/api/journal?key='+K,'Журнал')+LK('/api/names?key='+K,'Карта названий')
     +LK('/api/warm?key='+K,'Прогреть память')+LK('/api/geocache','Скачать места')+LK('/api/bundle?key='+K,'⬇ Всё для Claude')+'</div>';
   document.body.appendChild(b);
-  $('tm1').onclick=()=>setMode('text');$('tm2').onclick=()=>setMode('live');
+  $('tm1').onclick=()=>setMode('text');$('tm2').onclick=()=>setMode('live');$('tdw').onclick=drawOpen;$('tgs').onclick=gsOpen;
   $('tg').onclick=async()=>{setMode('text',true);$('ts').textContent='ищу места…';
     try{const r=await fetch('/api/test?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tt').value})});
       if(!r.ok){$('ts').textContent='нет доступа (проверьте пароль в адресе)';return}
@@ -395,6 +407,60 @@ $('fbsend').onclick=async()=>{if(!fbCtx)return;if(!fbCtx.reason){$('fbpt').textC
     if(!r.ok){$('fbpt').textContent='не отправилось (код '+r.status+')';return}
     FBV[fbCtx.kind==='zone'?zoneKey(fbCtx.obj):'m:'+fbCtx.obj.key]='bad';fbSave();fbUpdate();fbClose();if(D)redraw();renderFeed();toast('Записано в журнал','ok')}
   catch(e){$('fbpt').textContent='нет связи с сервером'}};
+// ----- рисование мест и поиск в карте (только режим проверки) -----
+// <DRAW-PURE>
+function drawLen(p){let m=0;for(let i=1;i<p.length;i++){const a=p[i-1],b=p[i],dy=(b[0]-a[0])*110540,dx=(b[1]-a[1])*111320*Math.cos((a[0]+b[0])/2*Math.PI/180);m+=Math.hypot(dx,dy)}return m}
+function drawInfo(t,p,w){return 'точек: '+p.length+(t==='line'?(p.length>1?', длина ≈ '+Math.round(drawLen(p))+' м, полоса '+w+' м':''):(p.length>2?', многоугольник':''))}
+function drawReady(name,t,p){return String(name).trim().length>=2&&p.length>=(t==='line'?2:3)}
+function drawPayload(name,t,w,p){return{name:String(name).trim(),type:t,width:+w||100,points:p}}
+// </DRAW-PURE>
+// <GS-PURE>
+function gsText(d){const L=['Запрос: '+d.query];
+  if(d.drawn_or_outline)L.push('Есть нарисованный контур или линия: он важнее карты.');
+  if(d.street)L.push('Улица: «'+d.street.name+'» ('+d.street.type+(d.street.explicit?', слово «улица» сказано':', слово не сказано')+'). Пробуем: '+d.street.variants.join(' | '));
+  L.push('Сайт выберет: '+((d.choice||[]).length?d.choice.map(c=>c.how+(c.dn?' «'+c.dn+'»':'')+', '+c.km+' км от центра ('+c.lat+', '+c.lon+')').join(' | '):'ничего (не найдено)'));
+  L.push('Ответ карты ('+(d.raw||[]).length+'):');(d.raw||[]).forEach((r,i)=>L.push((i+1)+'. '+r.display+' · '+r.class+'/'+r.type+' · важность '+r.importance+' · '+r.km+' км от центра ('+r.lat+', '+r.lon+')'));
+  if(d.error)L.push('Ошибка: '+d.error);
+  return L.join('\n')}
+// </GS-PURE>
+let drawOn=false,drawPts=[],drawGrp=null,drawKind='line',gsLast='';
+function drawRender(){if(drawGrp){map.removeLayer(drawGrp);drawGrp=null}
+  const w=+$('dpwv').value||100,g=[];
+  if(drawPts.length>=2){
+    if(drawKind==='line'){const mpp=156543.03*Math.cos(drawPts[0][0]*Math.PI/180)/Math.pow(2,map.getZoom());
+      g.push(L.polyline(drawPts,{color:'#2e9e4f',weight:Math.max(4,w/mpp),opacity:.3,lineCap:'round',interactive:false}));g.push(L.polyline(drawPts,{color:'#1b7a3a',weight:2,interactive:false}))}
+    else if(drawPts.length>=3)g.push(L.polygon(drawPts,{color:'#1b7a3a',weight:2,fillColor:'#2e9e4f',fillOpacity:.25,interactive:false}));
+    else g.push(L.polyline(drawPts,{color:'#1b7a3a',weight:2,interactive:false}))}
+  drawPts.forEach((p,i)=>g.push(L.circleMarker(p,{radius:i===0?7:5,color:'#fff',weight:2,fillColor:i===0?'#c00':'#1b7a3a',fillOpacity:1,interactive:false})));
+  drawGrp=L.layerGroup(g).addTo(map);$('dpi').textContent=drawInfo(drawKind,drawPts,w)}
+function drawAdd(ll){drawPts.push([+ll[0].toFixed(6),+ll[1].toFixed(6)]);drawRender()}
+function drawUndo(){drawPts.pop();drawRender()}
+function drawClear(){drawPts=[];drawRender()}
+async function drawList(){const l=$('dpl');if(!l)return;
+  try{const a=await (await fetch('/api/draw?key='+encodeURIComponent(TK))).json();
+    l.innerHTML=Array.isArray(a)&&a.length?'<b>Уже нарисовано (действует до следующего обновления сайта):</b>'+a.map(x=>'<div style="padding:4px 0">'+esc(x.name)+' · '+(x.type==='line'?'линия, '+x.width+' м':'многоугольник')+' <button data-del="'+esc(x.name)+'" style="padding:2px 8px">✕ удалить</button></div>').join(''):'';
+    l.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{await fetch('/api/draw?key='+encodeURIComponent(TK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delete:b.dataset.del})});drawList()})}
+  catch(e){}}
+function drawOpen(){drawOn=true;$('gs').style.display='none';$('dp').style.display='flex';map.getContainer().classList.add('drawing');drawRender();drawList()}
+function drawClose(){drawOn=false;$('dp').style.display='none';map.getContainer().classList.remove('drawing');drawClear()}
+async function drawSave(){const name=$('dpn').value;
+  if(!drawReady(name,drawKind,drawPts)){toast('Введите название и поставьте точки: линия от 2, многоугольник от 3','danger');return}
+  try{const r=await fetch('/api/draw?key='+encodeURIComponent(TK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(drawPayload(name,drawKind,$('dpwv').value,drawPts))});
+    const j=await r.json().catch(()=>({}));if(!r.ok){toast(j.error||('Не сохранилось (код '+r.status+')'),'danger');return}
+    toast('Сохранено «'+String(name).trim()+'»: работает сразу. Чтобы осталось насовсем, пришлите мне отчёт «Всё для Claude»','ok');$('dpn').value='';drawClear();drawList()}
+  catch(e){toast('Нет связи с сервером','danger')}}
+map.on('click',e=>{if(drawOn&&TK)drawAdd([e.latlng.lat,e.latlng.lng])});
+map.on('zoomend',()=>{if(drawOn)drawRender()});
+document.querySelectorAll('input[name="dpt"]').forEach(r=>r.onchange=()=>{drawKind=r.value;$('dpw').style.display=drawKind==='line'?'block':'none';drawRender()});
+$('dpu').onclick=drawUndo;$('dpx').onclick=drawClear;$('dps').onclick=drawSave;$('dpc').onclick=e=>{e.preventDefault();drawClose()};$('dpwv').oninput=drawRender;
+function gsOpen(){if(drawOn)drawClose();$('gs').style.display='flex';$('gsq').focus&&$('gsq').focus()}
+async function gsRun(){const q=$('gsq').value.trim();if(q.length<2){$('gss').textContent='введите название';return}
+  $('gss').textContent='ищу… (до 15 секунд)';$('gso').textContent='';
+  try{const r=await fetch('/api/geosearch?key='+encodeURIComponent(TK)+'&q='+encodeURIComponent(q));if(!r.ok){$('gss').textContent='ошибка '+r.status;return}
+    const d=await r.json();gsLast=gsText(d);$('gso').textContent=gsLast;$('gss').textContent='готово'}
+  catch(e){$('gss').textContent='нет связи с сервером'}}
+$('gsb').onclick=gsRun;$('gsq').onkeydown=e=>{if(e.key==='Enter')gsRun()};$('gsx').onclick=e=>{e.preventDefault();$('gs').style.display='none'};
+$('gsc').onclick=async()=>{const t=gsLast||'(сначала нажмите «Найти»)';try{await navigator.clipboard.writeText(t);$('gss').textContent='скопировано, вставьте в чат'}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy');$('gss').textContent='скопировано, вставьте в чат'}catch(x){$('gss').textContent='не удалось скопировать'}a.remove()}};
 // ----- Мои места: состояние выбранных мест, звук и вибрация при ухудшении -----
 const RANK={none:0,danger:1,alarm:2,rocket:3};
 // <MP-PURE>
