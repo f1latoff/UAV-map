@@ -17,7 +17,7 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
-BUILD = "пакет-3"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
+BUILD = "пакет-4"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
 START_TS = time.time()
 PERF = {"build_ms": 0, "calls": 0}
 SEEN = {}   # хеш адреса (только в памяти) -> когда обращался: сколько устройств пользуются сайтом
@@ -48,6 +48,7 @@ BUILTIN_PLACES = {   # закреплённые вручную названия:
     "устинк": [50.428216, 36.881933, 800, "село", "Устинка"],   # квартал Устинка (Шебекино)
     "зарубин": [50.43245, 36.53178, 700, "село", "Зарубино"],   # микрорайон Зарубино в Новой Нелидовке (не урочище)
     "коровин": [50.37092, 36.75815, 500, "село"],   # хутор Коровино (Шебекинский округ) по точке владельца; границу из карты не берём
+    "политодейск": [50.473768, 36.409698, 1000, "село", "Политотдельский"],   # опечатка в канале
     "политотдельск": [50.473768, 36.409698, 1000, "село", "Политотдельский"],   # посёлок Политотдельский (Белгородский округ)
     "политодельск": [50.473768, 36.409698, 1000, "село", "Политотдельский"],    # то же с опечаткой в канале («Политодельский»)
     "заячий": [50.4114, 36.869707, 800, "село", "Заячий хутор"],     # квартал Заячий хутор (Шебекино)
@@ -102,16 +103,17 @@ DRAWN = {k: v for k, v in load_json(DRAWFILE, {}).items() if isinstance(v, dict)
 
 def drawn_geom(item):
     pts = [[round(lon, 6), round(lat, 6)] for lat, lon in item["points"]]
-    if item["type"] == "line": return {"type": "LineString", "coordinates": pts, "width": item["width"]}
-    return {"type": "Polygon", "coordinates": [pts + [pts[0]]]}
+    kd = item.get("kind", "zone")
+    if item["type"] == "line": return {"type": "LineString", "coordinates": pts, "width": item["width"], "kind": kd}
+    return {"type": "Polygon", "coordinates": [pts + [pts[0]]], "kind": kd}
 
 for _k, _v in DRAWN.items():
     try: outlines[_k] = drawn_geom(_v)
     except Exception: pass
 
-STOP = r"пройти\s+в|заметьте|со\s+стороны|никому\s+не|не\s+пользоваться|оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
+STOP = r"выйти\s+из|выйдите\s+из|пройти\s+в|заметьте|со\s+стороны|никому\s+не|не\s+пользоваться|оставайтесь|не подходите|пройдите|займите|займи|всем|в укрыти|укрыти|уйдите|в ваш|стоп|летит|летят|движется|угроза|ударн|над вами|над городом|к вам|подлета\w*|находитесь|находимся|не покидаем|не покидайте|остановите|выйдите|срочно|на данный момент|активность не|не наблюда|сохраняйте|слушайте|покиньте|покидайте|\bидет\b|\bидёт\b|массов\w*"
 NOISE = (r"ракетн\w* опасност\w*|\bопасност\w* по бпла|тревог\w* по бпла|тревога|\bопасност\w*|пролёт\w*|пролет\w*|бпла|дрон\w*|"
-         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|\bчист(?:ое|о|ый|ая)\b|\bясн(?:ое|о|ый|ая)\b|\bбудьте\b|\bдержитесь\b|\bмест(?:о|а|у|е|ом|ах)?\b|\bдейству\w*|\bуважаем\w*|\bземляк\w*|\bсмотрим\b|\bзанимаем\w*|\bсохраняем\b|\bодного\b|\bодин\b|ваш\w*\s+направлен\w*|\bограничьт\w*|\bперемещени\w*|\bданн\w+\s+участк\w*|\bучасток\s+дороги|\bинформаци\w*|\bочень\b|\bситуативно\b|\bрсчс\b|\bэкстренн\w*|\bблизлежащ\w*\s+\w+|\bулицы\b|\bдорог(?:а|и|е|у|ой|ам|ах)?\b|\bуданоен\b|\bпо\s+возможности\b|\b(?:больш|высок)\w*\s+активност\w*|\bактивност\w*|\bоптоволокн\w*|\bдронов\b|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bспутник\w*|\bтыл\w*|\bдом(?:а|ов|ам|е)?\b|\bбез\b|\bтом\b|\bчисл\w*|\bмного\b|\bднр\b|\bлнр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|\bбезопасн\w*|\bвидео\b|\bпройти\b|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
+         r"фиксаци\w*|продолжа\w*|сохраня\w*|далее|в сторону|в направлении|внимание|отбой|от \S+|много|массов\w*|множествен\w*|ударн\w*|близлежащ\w*|окрестност\w*|реактивн\w*|небо чисто\w*|\bчист(?:ое|о|ый|ая)\b|\bясн(?:ое|о|ый|ая)\b|\bбудьте\b|\bдержитесь\b|\bпринять\b|\bпринимайте\b|\bпредельно\b|\bбдительн\w*|\bначина\w*|\bпродолжа\w*|\bмест(?:о|а|у|е|ом|ах)?\b|\bдейству\w*|\bуважаем\w*|\bземляк\w*|\bсмотрим\b|\bзанимаем\w*|\bсохраняем\b|\bодного\b|\bодин\b|ваш\w*\s+направлен\w*|\bограничьт\w*|\bперемещени\w*|\bданн\w+\s+участк\w*|\bучасток\s+дороги|\bинформаци\w*|\bочень\b|\bситуативно\b|\bрсчс\b|\bэкстренн\w*|\bблизлежащ\w*\s+\w+|\bулицы\b|\bдорог(?:а|и|е|у|ой|ам|ах)?\b|\bуданоен\b|\bпо\s+возможности\b|\b(?:больш|высок)\w*\s+активност\w*|\bактивност\w*|\bоптоволокн\w*|\bдронов\b|можно|продолжить|продолжайте|движени\w*|миновала|кольц\w*|развязк\w*|\bгород\b|авиационн\w*|бомбов\w*|ракетно\b|трасс\w*|участок|логистическ\w*|высок\w*\s+вероятност\w*|вероятност\w*|возможе?н\w*|атак\w*|налет\w*|налёт\w*|ранее|объявленн\w*|тревог\w*|fpv|оптоволокн\w*|активност\w*|высок\w*|ближайш\w*|врем\w*|даем|даём|\bотбо\w*|\bбудет\b|\bбудут\b|\bне\b|предварительн\w*|вышеперечисленн\w*|\bрегион\w*|\bмер\w*|предосторожност\w*|пуск\w*|самол[её]т\w*|противника|ракет\w*|\bспутник\w*|\bтыл\w*|\bдом(?:а|ов|ам|е)?\b|\bбез\b|\bтом\b|\bчисл\w*|\bмного\b|\bднр\b|\bлнр\b|\bгг\b|\bвсу\b|продолжа\w*|фиксаци\w*|множествен\w*|сохраня\w*|\bфедеральн\w+|на\s+всей\s+территории\s+област\w*|\bсторону\b|\bособ\w+|\bможет\b|вылет\w*|\bнеб(?:о|у|а|е|ом)\b|\bнет\b|\bбезопасн\w*|\bвидео\b|\bпройти\b|\bдвс\b|\bфпв\b|никому|пользоваться|заметьте|белгородск\w+\s+област\w+|соблюда\w*|бдительн\w*|осторожн\w*|сохраняйте|спокойстви\w*|\bкпп\b|контрольно-пропускн\w*\s+пункт\w*")
 NEIGH = r"курск|воронеж|липецк|брянск|сумск|херсон|запорож|\bорёл\b|\bорел\b|харьков(?!ск\w*\s+гор)|област"
 KM = re.compile(r"\d+\W*(?:й|ый|ой|го)?\W*(?:километр|км)", re.I)   # «26-й километр»: точка на трассе, в поиске по карте не находится
 ALIASES = [   # места, которые каналы называют по-своему: (как пишут, широта, долгота, радиус зоны в метрах)
@@ -130,6 +132,7 @@ ALIASES = [   # места, которые каналы называют по-с
     (re.compile(r"\bберег(?:а|ов|ам|ах)\b", re.I), 50.592088, 36.618359, 350),                          # «Берега»
     (re.compile(r"\bэнергомаш\w*", re.I), 50.602859, 36.579580, 400),                                   # Энергомаш
     (re.compile(r"\bаквапарк\w*", re.I), 50.510761, 36.671917, 350),                                    # аквапарк
+    (re.compile(r"\bлион\b", re.I), 50.52550, 36.51932, 300),                                           # ТЦ «Лион» (по отметке владельца сайта)
     (re.compile(r"^\W*центр(?:а|е|у|ом)?\W*$", re.I), 50.596805, 36.587735, 600),                       # «центр» = Соборная площадь (точка у Дома правительства, он стоит на площади)
 ]
 JUNK = r"cloudtips|благодарим|донат|подписывайтесь|подпишись|реклам|https?://|www\.|t\.me|max\.ru|rustore|приложени\w*|скачай|наши каналы|наш\w* канал|официальн\w+ канал"   # реклама и ссылки: тревогой не считаются
@@ -589,6 +592,15 @@ def fix_names(t):
     t = re.sub(r"\b[Сс]еверяков\w*", "Севрюково", t)
     t = re.sub(r"\b[Нн]ово[яе]\s+[Нн]елидовк\w*", "Новая Нелидовка", t)
     t = re.sub(r"\b[Сс]оломинск\w*\s+мост\w*", "Соломино", t)
+    t = re.sub(r"\b[Цц]емзавод\w*", "Цементный завод", t)                          # «Цемзавод» = Цементный завод (иначе находился одноимённый район Старого Оскола)
+    t = re.sub(r"\b[Уу]синк\w*", "Устинка", t)
+    t = re.sub(r"\bв\s+сторону\s+белгородск\w*\s+област\w*", " ", t, flags=re.I)        # «пролёты БПЛА в сторону Белгородской области»: это не участок «куда-то в область»
+    t = re.sub(r",\s*(?=от\s+[А-ЯЁ])", ". ", t)                                         # «от Титовки до 26-го километра, от Устинки до Масловой Пристани»: два участка, а не один
+    t = re.sub(r"\b([А-ЯЁ][а-яё-]+(?:ский|цкий))\s+(район|округ)\s+(?=[А-ЯЁ])", r"\1 \2, ", t)   # «Шебекинский район Шебекино» = два названия
+    def _mo(m):   # «в Алексеевском, Красногвардейском и Яковлевском МО» = три района
+        names = re.findall(r"[А-ЯЁ][а-яё-]+(?:ском|цком)", m.group(1))
+        return ", ".join(n[:-2] + "ий район" for n in names) + " "
+    t = re.sub(r"((?:[А-ЯЁ][а-яё-]+(?:ском|цком)(?:\s*,\s*|\s+и\s+))+[А-ЯЁ][а-яё-]+(?:ском|цком))\s+(?:МО|м\.\s?о\.|муниципальн\w+\s+округ\w*)", _mo, t)
     t = re.sub(r"\bв\s+направлении\s+[А-ЯЁа-яё-]+(?:ого|ского)\s+района\b", " ", t, flags=re.I)   # «Шебекино в направлении Новооскольского района»
     t = re.sub(r"(\w)\s+(станци[яи]\s)", r"\1, \2", t, flags=re.I)                                 # «отрадная станция Наумовка» = «отрадная, станция Наумовка»
     t = re.sub(r"(?<![А-Яа-яЁё-])[Гг]ород(?![А-Яа-яЁё])(?!\s+[А-ЯЁ])", "Белгород", t)               # «Внимание, город!» = весь Белгород
@@ -787,9 +799,9 @@ def how_found(pos):
     nt = pos.get("nt")
     if pos.get("kind") == "route": return "полоса между названными местами"
     if nt == "вручную": return "закреплено вручную" + (", граница из карты" if pos.get("poly") else " (круг)")
-    if nt == "контур вручную": return "контур, нарисованный вручную (outlines.json)"
+    if nt == "контур вручную": return "контур, нарисованный вручную (outlines.json" + (", фиолетовое точечное место)" if pos.get("kind") == "object" else ")")
     if nt == "задано в коде": return "народное место, задано в коде"
-    if nt == "контур вручную (улица)": return "улица, нарисованная вручную (линия, ширина около " + str(round(pos.get("w_line") or 100)) + " м)"
+    if nt == "контур вручную (улица)": return "улица, нарисованная вручную (линия, ширина около " + str(round(pos.get("w_line") or 100)) + " м" + (", фиолетовое точечное место)" if pos.get("kind") == "object" else ")")
     if nt == "улица": return f"улица в Белгороде, круг {round(pos.get('r_in') or 0)} м по точке из карты"
     if pos.get("poly"): return "граница из карты" if pos.get("kind") != "district" else "граница района из карты"
     if pos.get("kind") == "district": return "район кругом (границы нет)"
@@ -803,7 +815,7 @@ def as_poly(pos, g):
 
 CASE = [("ского", "ское"), ("ском", "ское"), ("ском", "ский"), ("ого", "ое"), ("ому", "ое"), ("ым", "ое"), ("ым", "ый"), ("им", "ий"), ("ом", "ое"), ("ом", "ый"),
         ("ой", "ая"), ("ой", "а"), ("ую", "ая"), ("ова", "ово"), ("ева", "ево"), ("ина", "ино"), ("ки", "ка"), ("ке", "ка"), ("ку", "ка"), ("кой", "ка"),
-        ("ни", "нь"), ("ги", "га"), ("ге", "га"), ("ы", "а"), ("е", "а"), ("у", "а"), ("а", "")]
+        ("ни", "нь"), ("ги", "га"), ("ге", "га"), ("це", "ец"), ("цу", "ец"), ("ца", "ец"), ("цем", "ец"), ("ем", "ий"), ("его", "ий"), ("ему", "ий"), ("ы", "а"), ("е", "а"), ("е", "о"), ("у", "а"), ("а", ""), ("е", ""), ("у", "")]
 
 def case_forms(ph):
     """Все вероятные начальные формы названия по падежным окончаниям («Новой Нелидовке» -> «Новая Нелидовка»); для сверки с нарисованными контурами."""
@@ -812,6 +824,12 @@ def case_forms(ph):
         o = [w] + [w[:-len(a)] + b for a, b in CASE if w.lower().endswith(a) and len(w) > len(a) + 2]
         opts.append(list(dict.fromkeys(o))[:6])
     return [" ".join(c) for c in itertools.product(*opts[:3])]
+
+def geo_kind(g0, g):
+    """Как рисовать нарисованное вручную место: «zone» (красное/жёлтое: район, село) или «point» (фиолетовое: точечное место, объект, улица). Берётся из геометрии («kind») или свойств, по умолчанию зона."""
+    props = (g0.get("properties") if g0.get("type") == "Feature" else (g0["features"][0].get("properties") if g0.get("type") == "FeatureCollection" and g0.get("features") else None)) or {}
+    k = str(g.get("kind") or props.get("kind") or "zone").strip().lower()
+    return "point" if k in ("point", "object", "точка", "точечное", "точечное место", "фиолетовое") else "zone"
 
 def geo_width(g0, g):
     """Ширина полосы для линии: из самой геометрии («width») или из свойств нарисованного объекта."""
@@ -839,14 +857,15 @@ def manual_pos(name):
             if kn and kn in sforms:
                 w = geo_width(g0, g); poly, pts = line_zone(g, w)
                 if poly:
-                    pos = as_poly({"lat": sum(p[0] for p in pts) / len(pts), "lon": sum(p[1] for p in pts) / len(pts), "kind": "settlement", "r_in": 300, "r_out": 450, "imp": 1, "nt": "контур вручную (улица)"}, poly)
+                    gk = geo_kind(g0, g)
+                    pos = as_poly({"lat": sum(p[0] for p in pts) / len(pts), "lon": sum(p[1] for p in pts) / len(pts), "kind": "object" if gk == "point" else "settlement", "r_in": 300, "r_out": 450, "imp": 1, "nt": "контур вручную (улица)"}, poly)
                     pos["w_line"] = w
                     return pos
             continue
         if any(re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", f) for f in forms):
             rings = [g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]
             pts = [p for r in rings for p in r]
-            return as_poly({"lat": sum(p[1] for p in pts) / len(pts), "lon": sum(p[0] for p in pts) / len(pts), "kind": "settlement",
+            return as_poly({"lat": sum(p[1] for p in pts) / len(pts), "lon": sum(p[0] for p in pts) / len(pts), "kind": "object" if geo_kind(g0, g) == "point" else "settlement",
                             "r_in": 1000, "r_out": 1500, "imp": 1, "nt": "контур вручную"}, g)
     return None
 
@@ -984,9 +1003,11 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 if plv: places = list(plv)
             lowx = re.sub(r"от\s+белгородск\w+\s+област\w+", " ", low)   # «Воронежская область от Белгородской области»: про соседний регион
             other_first = re.match(r"\s*(?:воронежск|курск|брянск|орловск|липецк|харьковск|сумск)", low)
-            mass = re.search(r"массов\w*\s+пр[оа]л[её]т|массированн", lowx) and re.search(r"белгородск\w* област", lowx) and not other_first   # «массовые пролёты… Белгородская область»: по всей области, даже если названо место
-            if re.search(r"всей территории|по всей области", lowx) or mass or (not places and not other_first and re.search(r"белгородск\w* област", lowx)):
-                oblast_drone = {"time": hhmm, "level": lvl}   # тревога по всей области: плашка и оранжевая рамка, без заливки
+            bel = re.search(r"белгородск\w* област", lowx)   # Белгородская область названа сама по себе (не «от Белгородской области»)
+            mass = bel and re.search(r"(?:массов|множествен)\w*\s+(?:пр[оа]л[её]т|фиксаци)|массированн", lowx)   # «массовые пролёты… Белгородская область»: по всей области, даже если названо место
+            flow = re.search(r"пр[оа]л[её]т\w*[\s\w]{0,30}в\s+сторону\s+белгородск\w*\s+област", lowx)       # «От Харькова продолжаются пролёты БПЛА в сторону Белгородской области»
+            if re.search(r"всей территории|по всей области", lowx) or mass or flow or (not places and bel and (not other_first or re.search(r"бпла|дрон", lowx))):
+                oblast_drone = {"time": hhmm, "level": "alarm" if (mass or flow) else lvl}   # тревога по всей области: плашка и оранжевая рамка, без заливки
                 if cur is not None: cur["notes"].append(("тревога" if lvl == "alarm" else "опасность") + " по всей области (плашка и рамка вокруг карты)")
             rc = lambda pl: merge_forms(pl, geo)
             for phr in loose:   # «трасса Никольское Таврово»: два названия подряд = участок; а «Новая Деревня» = одно название
@@ -1018,7 +1039,7 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
                 res = []
                 for pl in pls:
                     ws = pl.split()
-                    if len(ws) >= 2 and ws[0].lower() not in TYPEWORDS and not KM.search(pl) and not rc(pl) and (all(len(w) > 3 and rc(w) for w in ws) or (len(ws) == 2 and len(ws[0]) > 3 and not ADJ_END.search(ws[0]) and rc(ws[0]))): res += ws
+                    if len(ws) >= 2 and ws[0].lower() not in TYPEWORDS and not KM.search(pl) and not re.search(r"район|округ", pl, re.I) and not rc(pl) and (all(len(w) > 3 and rc(w) for w in ws) or (len(ws) == 2 and len(ws[0]) > 3 and not ADJ_END.search(ws[0]) and rc(ws[0]))): res += ws
                     else: res.append(pl)
                 return res
             places = split_glued(places)
@@ -1246,7 +1267,7 @@ def _status_html(key, probe):
            row(None, "Контуры, нарисованные вручную", f"{len(outlines)}: {_html.escape(', '.join(sorted(outlines)))}"),
            row(None, "Закреплённые места", f"{len(manual)}"),
            row(None, "Прогрев и карта названий", f"{'идёт: ' + str(WARM['done']) + ' из ' + str(WARM['total']) if WARM['running'] else 'не запущен' if not seen_n else 'готово'}; названий проверено: {seen_n}, найдено: {found}"),
-           row(None, "Нарисованные места", f"{len(DRAWN)}: " + _html.escape(", ".join(v.get("name", "") for v in DRAWN.values()) or "нет") + " (действуют сразу, в файл на GitHub не записаны)"),
+           row(None, "Нарисованные места", f"{len(DRAWN)}: " + _html.escape(", ".join(v.get("name", "") + (" (точка)" if v.get("kind") == "point" else "") for v in DRAWN.values()) or "нет") + " (действуют сразу, в файл на GitHub не записаны)"),
            row(None, "Журнал", f"записей: {len(JOURNAL)}, из них отметок «неверно»: {sum(1 for v in JOURNAL.values() if v.get('tag') == 'ошибка зоны')}"),
            row(None, "Архив сообщений", f"{len(ARCHIVE)} сообщений" + (f", с {datetime.fromtimestamp(min(v['ts'] for v in ARCHIVE.values()), MSK).strftime('%d.%m %H:%M')}" if ARCHIVE else ""))]
     cfg = [row(None, "Каналы", _html.escape(", ".join(CHANNELS))), row(None, "Жизнь зоны БПЛА / ракетной опасности", f"{TTL_MIN} / {ROCKET_TTL} мин"), row(None, "Регион", _html.escape(REGION))]
@@ -1282,7 +1303,7 @@ def api_bundle():
     out = [f"ОТЧЁТ САЙТА ДЛЯ CLAUDE · {datetime.now(MSK).strftime('%d.%m.%Y %H:%M:%S')} МСК", "", "=== СОСТОЯНИЕ САЙТА ===", _plain(_status_html(key, False)), "", f"=== ЖУРНАЛ: ЧТО САЙТ НЕ ПОНЯЛ ({len(jr)}) ==="]
     out += [_entry_text(v) + "\n" for v in jr] or ["(пусто)"]
     out += ["", f"=== НАРИСОВАННЫЕ МЕСТА ({len(DRAWN)}): действуют сразу, чтобы закрепить навсегда, их добавляют в outlines.json ==="]
-    out += [json.dumps({k: {"type": "Feature", "properties": {"name": v["name"], **({"width": v["width"]} if v["type"] == "line" else {})}, "geometry": drawn_geom(v)}}, ensure_ascii=False) for k, v in DRAWN.items()] or ["(нет)"]
+    out += [json.dumps({k: {"type": "Feature", "properties": {"name": v["name"], "kind": v.get("kind", "zone"), **({"width": v["width"]} if v["type"] == "line" else {})}, "geometry": drawn_geom(v)}}, ensure_ascii=False) for k, v in DRAWN.items()] or ["(нет)"]
     out += ["", f"=== АРХИВ: ПОСЛЕДНИЕ {len(ar)} СООБЩЕНИЙ И КАК САЙТ ИХ ПОНЯЛ ==="]
     for v in ar:
         extra = [x for x in (("места: " + "; ".join(v["places"])) if v.get("places") else "", ("не найдено: " + "; ".join(v["unknown"])) if v.get("unknown") else "", ("нарисовано: " + "; ".join(v["drawn"])) if v.get("drawn") else "",
@@ -1414,7 +1435,7 @@ def api_draw():
     """Рисование мест в тестовом приложении: линия (улица) с шириной или многоугольник. Действует сразу; в отчёт «Всё для Claude» попадает для постоянного закрепления. Только с паролем."""
     if not key_ok(): return ("", 404)
     if request.method == "GET":
-        return jsonify([{"name": v.get("name"), "type": v.get("type"), "width": v.get("width"), "n": len(v.get("points", [])), "ts": v.get("ts")} for v in DRAWN.values()])
+        return jsonify([{"name": v.get("name"), "type": v.get("type"), "width": v.get("width"), "kind": v.get("kind", "zone"), "n": len(v.get("points", [])), "ts": v.get("ts")} for v in DRAWN.values()])
     d = request.get_json(silent=True)
     if not isinstance(d, dict): return jsonify({"error": "нужен JSON"}), 400
     if d.get("delete"):
@@ -1432,12 +1453,12 @@ def api_draw():
         return jsonify({"error": "нужно не меньше " + ("2 точек" if typ == "line" else "3 точек") + " внутри области"}), 400
     try: width = max(30.0, min(500.0, float(d.get("width") or 100)))
     except Exception: width = 100.0
-    key = name.lower()
-    item = {"name": name, "type": typ, "width": width, "points": pts, "ts": time.time()}
+    key = name.lower(); kind = "point" if str(d.get("kind")).lower() in ("point", "object") else "zone"
+    item = {"name": name, "type": typ, "kind": kind, "width": width, "points": pts, "ts": time.time()}
     DRAWN[key] = item; outlines[key] = drawn_geom(item); save_json(DRAWFILE, DRAWN)
-    feat = {"type": "Feature", "properties": {"name": name, **({"width": width} if typ == "line" else {})}, "geometry": drawn_geom(item)}
+    feat = {"type": "Feature", "properties": {"name": name, "kind": kind, **({"width": width} if typ == "line" else {})}, "geometry": drawn_geom(item)}
     journal_add([{"key": f"dr:{int(time.time() * 1000)}", "ch": "рисование", "ts": time.time(), "tag": "нарисовано", "text": "",
-                  "reason": f"нарисовано «{name}»: " + (f"линия, ширина {int(width)} м" if typ == "line" else "многоугольник"), "detail": json.dumps(feat, ensure_ascii=False)}])
+                  "reason": f"нарисовано «{name}»: " + (f"линия, ширина {int(width)} м" if typ == "line" else "многоугольник") + (", фиолетовое точечное место" if kind == "point" else ", красная зона"), "detail": json.dumps(feat, ensure_ascii=False)}])
     return jsonify({"ok": True, "name": name})
 
 @app.route("/api/geosearch")
