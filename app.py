@@ -236,6 +236,8 @@ def _places_in(head, text):
     return out
 
 def stems(s): return {w[:5] for w in re.findall(r"\w+", s.lower().replace("ё", "е")) if len(w) > 3}
+GENERIC_STEMS = {"улица", "просп", "переу", "бульв", "проез", "набер", "район", "округ", "город", "муниц", "посел", "микро", "дерев", "хутор"}   # слова-типы: у разных мест они общие
+def kst(s): return stems(s) - GENERIC_STEMS   # основы только собственного названия («улица Корочанская» и «улица Волчанская» не пересекаются)
 
 SETTLE = {"village", "hamlet", "town", "isolated_dwelling", "locality", "farm", "allotments"}
 CITYLIKE = SETTLE | {"city", "suburb", "quarter", "neighbourhood"}
@@ -864,7 +866,11 @@ def with_outline(pos, name=""):
     if not g: return {**pos, "why": why or "в карте нет нарисованной застройки рядом с селом (запомнено)"}
     return as_poly(pos, g)
 
-def zkey(pos): return (pos["kind"], round(pos["lat"], 2), round(pos["lon"], 2))
+def zkey(pos):
+    """Ключ зоны: одно и то же место из разных сообщений склеивается. Для мест с точными координатами (нарисованные контуры и улицы, закреплённые, объекты по координатам) берём 3 знака (~100 м),
+    иначе рядом стоящие улицы центра (Преображенская и проспект Славы) сливались бы в одну зону; для найденных по карте оставляем 2 знака (~1 км)."""
+    d = 3 if pos.get("imp") == 1 else 2
+    return (pos["kind"], round(pos["lat"], d), round(pos["lon"], d))
 
 def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone, trace=None):
     now = now or time.time()
@@ -960,12 +966,12 @@ def build(posts, now=None, geo=candidates, zones=rocket_zones, ozone=oblast_zone
             if kind == "clear":
                 if general: drone, unknown, oblast_drone = {}, [], None
                 else:
-                    ss = set().union(*[stems(x) for x in names])
-                    drone = {k: z for k, z in drone.items() if not (stems(z["place"]) & ss)}
+                    ss = set().union(*[kst(x) for x in names])
+                    drone = {k: z for k, z in drone.items() if not (kst(z["place"]) & ss)}
             else:   # «Отбой по ранее объявленным тревогам, но опасность сохраняется»: тревога снижается до опасности, зоны остаются
-                ss = set().union(*[stems(x) for x in names]) if names else set()
+                ss = set().union(*[kst(x) for x in names]) if names else set()
                 for z in drone.values():
-                    if general or (stems(z["place"]) & ss): z["level"] = "danger"; z["last"] = max(z["last"], p["ts"])
+                    if general or (kst(z["place"]) & ss): z["level"] = "danger"; z["last"] = max(z["last"], p["ts"])
                 if general and oblast_drone: oblast_drone = {**oblast_drone, "level": "danger"}
         elif kind == "alert":
             lvl = level_of(txt)
