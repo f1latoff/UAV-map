@@ -17,7 +17,7 @@ app = Flask(__name__, static_folder="static")
 lock = threading.Lock()
 state = {"last_fetch": 0, "posts": {}, "cold_done": set(), "status": {}}
 CENTER = {"lat": 50.5997, "lon": 36.5983}
-BUILD = "пакет-4"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
+BUILD = "пакет-6"   # метка сборки: на странице «Состояние» видно, какая версия реально загружена
 START_TS = time.time()
 PERF = {"build_ms": 0, "calls": 0}
 SEEN = {}   # хеш адреса (только в памяти) -> когда обращался: сколько устройств пользуются сайтом
@@ -1409,7 +1409,8 @@ def api_keycheck():
     return jsonify({"ok": True})
 
 TEST_HEAD = [('<title>БПЛА 31: карта оповещений</title>', '<title>БПЛА 31 ТЕСТ</title>'),
-             ('<link rel="manifest" href="/manifest.webmanifest">', '<link rel="manifest" href="/test.webmanifest">\n<meta name="robots" content="noindex"><meta name="referrer" content="same-origin">'),
+             ('<link rel="canonical" href="https://bpla-31.ru/">\n', ''), ('<meta property="og:url" content="https://bpla-31.ru/">\n', ''),   # тестовая страница не выдаёт себя за главную
+             ('<link rel="manifest" href="/manifest.webmanifest">', '<link rel="manifest" href="/test.webmanifest">\n<meta name="robots" content="noindex">'),   # политику Referer задаёт сама страница (иначе карта OpenStreetMap блокирует плитки)
              ('<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">', '<link rel="apple-touch-icon" href="/static/test-apple-touch-icon.png">'),
              ('<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">', '<link rel="icon" type="image/png" sizes="32x32" href="/static/test-favicon-32.png">'),
              ('<meta name="apple-mobile-web-app-title" content="БПЛА 31">', '<meta name="apple-mobile-web-app-title" content="БПЛА 31 ТЕСТ">')]
