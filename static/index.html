@@ -10,10 +10,24 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#222222">
 <script>(function(){try{var m=localStorage.getItem('theme')||'auto';if(m==='dark'||(m==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()</script>
+<meta name="referrer" content="origin-when-cross-origin">
+<meta name="description" content="Неофициальная карта оповещений о БПЛА и ракетной опасности по Белгородской области: места определяются автоматически по сообщениям открытых каналов.">
+<link rel="canonical" href="https://bpla-31.ru/">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="БПЛА 31">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:url" content="https://bpla-31.ru/">
 <meta property="og:title" content="БПЛА 31: карта оповещений Белгородской области">
 <meta property="og:description" content="Неофициальная карта оповещений о БПЛА и ракетной опасности по открытым источникам">
-<meta property="og:image" content="https://uav-map-kidc.onrender.com/static/icon-512.png">
+<meta property="og:image" content="https://bpla-31.ru/static/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="БПЛА 31: карта оповещений Белгородской области">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="БПЛА 31: карта оповещений Белгородской области">
+<meta name="twitter:description" content="Неофициальная карта оповещений о БПЛА и ракетной опасности по открытым источникам">
+<meta name="twitter:image" content="https://bpla-31.ru/static/og-image.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>html{background:#222}
@@ -137,7 +151,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const norm=s=>String(s).toLowerCase().replace(/ё/g,'е');
 const map=L.map('map').setView([50.6,36.6],9);
 map.attributionControl.setPrefix(false);   // без подписи библиотеки; «© OpenStreetMap» остаётся (обязательна по лицензии данных)
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',referrerPolicy:'origin'}).addTo(map);   // OpenStreetMap требует заголовок Referer: без него плитки блокируются (403)
 // слои зон: заливка рисуется сплошным цветом, а прозрачность 40% применяется ко всему слою сразу, поэтому где зоны пересекаются, цвет не темнеет
 const mkPane=(n,z,o)=>{const p=map.createPane(n);p.style.zIndex=z;p.style.opacity=o};
 mkPane('zMargin',402,.12);mkPane('zFillOld',403,.25);mkPane('zFill',404,.4);mkPane('zPointOld',405,.25);mkPane('zPoint',406,.4);mkPane('zLine',408,1);
